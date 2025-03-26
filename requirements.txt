@@ -1,1 +1,8 @@
-pip install pdf2image pillow
+# for extracting images from pdfs
+pip install pymupdf
+
+# for image manipulation and calculations
+pip install opencv-python numpy 
+
+# for maths
+pip install scipy
