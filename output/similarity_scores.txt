@@ -1,4 +1,0 @@
-Lucas-Kanade -> SSIM: 0.2743, MSE: 97.87
-Farneback -> SSIM: 0.0771, MSE: 100.77
-SIFT -> SSIM: 0.2371, MSE: 98.65
-Demons -> SSIM: 0.0094, MSE: 103.18

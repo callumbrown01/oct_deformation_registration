@@ -42,6 +42,7 @@ def extract_images_from_pdf(pdf_folder):
                     filtered_filename = os.path.join(filtered_folder, f"{os.path.splitext(pdf_file)[0]}_page{page_num+1}_filtered.png")
                     img_filtered.save(filtered_filename, "PNG")
 
+                    print(shape.img_pil)
                     print(f"Unfiltered image saved: {unfiltered_filename}")
                     print(f"Filtered image saved: {filtered_filename}")
 
