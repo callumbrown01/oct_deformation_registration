@@ -3,15 +3,6 @@ import fitz  # PyMuPDF
 from PIL import Image, ImageFilter
 import io
 
-def apply_median_filter(image, size=3):
-    """
-    Apply a median filter to the given image.
-    :param image: PIL Image object
-    :param size: Filter size (default is 3)
-    :return: Filtered PIL Image object
-    """
-    return image.filter(ImageFilter.MedianFilter(size))
-
 def extract_images_from_pdf(pdf_folder):
     output_folder = os.path.join(pdf_folder, "extracted_images")
     filtered_folder = os.path.join(pdf_folder, "filtered_images")
@@ -37,18 +28,8 @@ def extract_images_from_pdf(pdf_folder):
                     unfiltered_filename = os.path.join(output_folder, f"{os.path.splitext(pdf_file)[0]}_page{page_num+1}.png")
                     img_pil.save(unfiltered_filename, "PNG")
 
-                    # Apply median filter and save filtered image
-                    img_filtered = apply_median_filter(img_pil)
-                    filtered_filename = os.path.join(filtered_folder, f"{os.path.splitext(pdf_file)[0]}_page{page_num+1}_filtered.png")
-                    img_filtered.save(filtered_filename, "PNG")
-
-                    print(shape.img_pil)
-                    print(f"Unfiltered image saved: {unfiltered_filename}")
-                    print(f"Filtered image saved: {filtered_filename}")
-
     print("✅ Image extraction and filtering complete!")
 
 # Set the folder containing PDFs
-pdf_folder = "test_images_1"
-
+pdf_folder = "Images_2025_04_09/BT006M-L3-NB-0009"
 extract_images_from_pdf(pdf_folder)
