@@ -1,0 +1,42 @@
+[
+  {
+    "date": "2025-05-27",
+    "net_changes": {
+      "Niaz": -10.0,
+      "Callum": -11.350000000000001,
+      "Travis": 30.049999999999997,
+      "Brandon": -4.0,
+      "Atulya": -10.0,
+      "Keegan ": 6.75
+    },
+    "time_played_seconds": {
+      "Niaz": 11670,
+      "Callum": 14204,
+      "Travis": 14182,
+      "Brandon": 14130,
+      "Atulya": 4394,
+      "Keegan ": 4796
+    }
+  },
+  {
+    "date": "2025-06-03",
+    "net_changes": {
+      "Brandon": 0.0,
+      "Niaz": -10.0,
+      "Travis": 23.15,
+      "Callum": 18.85,
+      "Keegan ": 14.8,
+      "Joshua Fry": -16.2,
+      "Julian": -10.6
+    },
+    "time_played_seconds": {
+      "Brandon": 8094,
+      "Niaz": 4678,
+      "Travis": 7192,
+      "Callum": 8057,
+      "Keegan ": 2824,
+      "Joshua Fry": 6983,
+      "Julian": 4424
+    }
+  }
+]
