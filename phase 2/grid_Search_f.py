@@ -5,30 +5,18 @@ import numpy as np
 import tkinter as tk
 from tkinter import ttk, filedialog
 from PIL import Image, ImageTk
-import csv
 
 class OpticalFlowPage(ttk.Frame):
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
 
         # Available algorithms
-        self.algorithms = ['Farneback', 'Lucas-Kanade', 'Speckle Tracking', 'TVL1', 'DIS']
-
+        self.algorithms = ['Farneback', 'Lucas-Kanade', 'Speckle Tracking', 'TVL1']
         try:
             self.tvl1 = cv2.optflow.DualTVL1OpticalFlow_create()
-            self.tvl1.setTau(0.25)        # time step
-            self.tvl1.setLambda(0.15)     # smoothness weight
-            self.tvl1.setTheta(0.3)       # tightness of the solver
-            self.tvl1.setScalesNumber(5)  # pyramid levels
-            self.tvl1.setWarpingsNumber(3)
-            self.tvl1.setEpsilon(0.01)    # convergence threshold
-        except AttributeError:
-            # opencv‑contrib not installed, drop TVL1
+        except Exception:
             self.algorithms.remove('TVL1')
             self.tvl1 = None
-
-        # --- DIS init (so you don't recreate it every frame) ---
-        self.dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
 
         # Controls frame
         ctrl = ttk.Frame(self)
@@ -135,67 +123,29 @@ class OpticalFlowPage(ttk.Frame):
             self._compute_all()
             self.show_flow()
 
-    def compute_flow(self, img1, img2, method):
+    def compute_flow(self, img1, img2, method, **params):
         if method == 'Farneback':
             return cv2.calcOpticalFlowFarneback(
                 img1, img2, None,
-                pyr_scale  = 0.7,
-                levels     = 5,
-                winsize    = 21,
-                iterations = 1,
-                poly_n     = 7,
-                poly_sigma = 1.1,
-                flags      = 0
+                pyr_scale  = params.get('pyr_scale', 0.5),
+                levels     = params.get('levels', 3),
+                winsize    = params.get('winsize', 15),
+                iterations = params.get('iterations', 3),
+                poly_n     = params.get('poly_n', 5),
+                poly_sigma = params.get('poly_sigma', 1.2),
+                flags      = params.get('flags', 0)
             )
-        if method == 'TVL1':
-            if not self.tvl1:
-                raise RuntimeError("TV-L1 not available – check opencv-contrib install")
-            # pre-normalize
-            im1 = img1.astype(np.float32) / 255.0
-            im2 = img2.astype(np.float32) / 255.0
-
-            # optional parameter overrides:
-            for name in ['Tau','Lambda','Theta','ScalesNumber','WarpingsNumber','Epsilon']:
-                if name.lower() in params:
-                    getattr(self.tvl1, f"set{name}")(params[name.lower()])
-
-            # warm‑start (or None)
-            if params.get('use_init_flow', False):
-                h, w = im1.shape
-                init = np.zeros((h,w,2), np.float32)
-            else:
-                init = None
-
-            return self.tvl1.calc(im1, im2, init)
+        if method == 'TVL1' and self.tvl1:
+            return self.tvl1.calc(img1, img2, None)
         if method == 'Lucas-Kanade':
-            # Dense LK: track every pixel
-            h, w = img1.shape
-            # build Nx1x2 grid of all (x,y)
-            ys, xs = np.mgrid[0:h, 0:w]
-            p0 = np.stack([xs, ys], axis=-1).astype(np.float32)
-            p0 = p0.reshape(-1,1,2)  # (h*w)×1×2
-
-            # run PyrLK (tweak winSize/maxLevel/criteria as you like)
-            p1, st, _ = cv2.calcOpticalFlowPyrLK(
-                img1, img2, p0, None,
-                winSize  = (21,21),
-                maxLevel = 3,
-                criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
-            )
-
-            # reshape results and build dense flow
-            flow = np.zeros((h, w, 2), dtype=np.float32)
-            valid = (st.reshape(-1) == 1)
-            p0_valid = p0.reshape(-1,2)[valid]
-            p1_valid = p1.reshape(-1,2)[valid]
-            disp = p1_valid - p0_valid
-
-            xs = p0_valid[:,0].astype(int)
-            ys = p0_valid[:,1].astype(int)
-            flow[ys, xs, 0] = disp[:,0]
-            flow[ys, xs, 1] = disp[:,1]
-
-            return flow
+            p0 = cv2.goodFeaturesToTrack(img1, maxCorners=200,
+                                         qualityLevel=0.01, minDistance=7)
+            if p0 is None:
+                return None
+            p1, st, _ = cv2.calcOpticalFlowPyrLK(img1, img2, p0, None)
+            pts0 = p0[st.flatten()==1].reshape(-1,2)
+            pts1 = p1[st.flatten()==1].reshape(-1,2)
+            disp = pts1 - pts0
             return np.stack((pts0[:,0], pts0[:,1], disp[:,0], disp[:,1]), axis=1)
         if method == 'Speckle Tracking':
             h, w = img1.shape
@@ -216,11 +166,7 @@ class OpticalFlowPage(ttk.Frame):
                 pts1.append((x0+dx, y0+dy))
             disp = np.array(pts1) - np.array(pts)
             return np.concatenate((np.array(pts), disp), axis=1)
-        if method == "DIS":
-            self.dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
-            return self.dis.calc(img1, img2, None)
         return None
-        
 
     def show_flow(self):
         self.canvas.delete('all')
@@ -379,9 +325,6 @@ class OpticalFlowPage(ttk.Frame):
 
                     # draw error line and accumulate metrics
                     if self.show_net_error_var.get():
-                        # if the calculated position of the pixel after the full displacement is not on the image, its excluded from error calculations.
-                        if xc > 360 or xc < 0 or yc > 360 or yc < 0:
-                            continue
                         err = np.hypot(xc - xa, yc - ya)
                         total_err += err
                         mag = max(np.hypot(ya - y0, xa - x0), 1e-6)
@@ -402,95 +345,25 @@ class OpticalFlowPage(ttk.Frame):
                     fill='black', font=('TkDefaultFont', 10, 'bold')
                 )
 
-    def test_algorithms(self, root_folder, csv_path):
-        """
-        For each algorithm:
-        • For each subfolder (instance) in root_folder:
-            – load images & .npy ground‑truth
-            – compute mean endpoint error
-            – compute cumulative displacement magnitude
-        • compute overall mean error across instances
-        • compute overall cumulative_disp (sum of instance cum_disp)
-        • write CSV with columns:
-            algorithm, <inst1_error>,..., overall_error, cumulative_disp
-        """
-        # 1) gather subfolders
-        subs = sorted(
-            os.path.join(root_folder, d)
-            for d in os.listdir(root_folder)
-            if os.path.isdir(os.path.join(root_folder, d))
-        )
-        inst_names = [os.path.basename(s) for s in subs]
-
-        # 2) prepare CSV
-        fieldnames = ['algorithm'] + inst_names + ['overall_error', 'cumulative_disp']
-        with open(csv_path, 'w', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-
-            # 3) loop algorithms
-            for alg in self.algorithms:
-                inst_errors = []
-                inst_cumdisp = []
-
-                for sub in subs:
-                    imgs, npy = self._load_folder_data(sub)
-                    errs = []
-                    cum_disp = 0.0
-
-                    # for each adjacent pair
-                    for i in range(1, len(imgs)):
-                        im0, im1 = imgs[i-1], imgs[i]
-                        flow = self.compute_flow(im0, im1, alg)
-                        errs.append(self._mean_endpoint_error(flow, npy[i]))
-
-                        # compute per‑pixel magnitudes and average
-                        if flow is not None and flow.ndim == 3:
-                            mag = np.hypot(flow[:,:,0], flow[:,:,1])
-                            cum_disp += np.mean(mag)
-
-                    inst_errors.append(np.nanmean(errs))
-                    inst_cumdisp.append(cum_disp)
-
-                # 4) overall metrics
-                overall_err  = np.nanmean(inst_errors)
-                overall_disp = np.nansum(inst_cumdisp)
-
-                # 5) write row
-                row = {'algorithm': alg,
-                    'overall_error': overall_err,
-                    'cumulative_disp': overall_disp}
-                # instance‑by‑instance error columns
-                for name, e in zip(inst_names, inst_errors):
-                    row[name] = e
-
-                writer.writerow(row)
-
-        print(f"[+] Algorithm performance written to {csv_path}")
-    
     def _load_folder_data(self, folder):
         """
         Load grayscale images and their dx_/dy_ .npy flows from a single folder.
         Returns (images_list, npy_inc_list).
         """
         files = os.listdir(folder)
-        # 1) get and sort image filenames
+        # images
         imgs = sorted(
             [f for f in files if f.lower().endswith(('.png','.jpg','.jpeg','.tif'))],
             key=self._numeric_key
         )
-        images = [
-            cv2.imread(os.path.join(folder, f), cv2.IMREAD_GRAYSCALE)
-            for f in imgs
-        ]
+        images = [cv2.imread(os.path.join(folder, f), cv2.IMREAD_GRAYSCALE)
+                    for f in imgs]
 
-        # 2) get and sort dx_/dy_ .npy files
+        # .npy flows
         dxs = sorted([f for f in files if f.startswith('dx_') and f.endswith('.npy')],
-                     key=self._numeric_key)
+                        key=self._numeric_key)
         dys = sorted([f for f in files if f.startswith('dy_') and f.endswith('.npy')],
-                     key=self._numeric_key)
-
-        # 3) load them into a list of H×W×2 arrays (with a dummy None at index 0)
+                        key=self._numeric_key)
         npy_inc = [None]
         for dx_fn, dy_fn in zip(dxs, dys):
             dx = np.load(os.path.join(folder, dx_fn))
@@ -498,7 +371,7 @@ class OpticalFlowPage(ttk.Frame):
             npy_inc.append(np.dstack((dx, dy)))
 
         return images, npy_inc
-    
+
     @staticmethod
     def _parameter_grid(param_defs):
         """Yield every combination of params from a dict of lists."""
@@ -509,58 +382,39 @@ class OpticalFlowPage(ttk.Frame):
     @staticmethod
     def _mean_endpoint_error(computed_flow, gt_flow):
         """
-        Compute mean endpoint error against inverted gt_flow:
-        - For dense flow arrays (H×W×2), use every pixel (excluding endpoints outside).
-        - For sparse flow (N×4), use only the detected points.
+        Compute mean endpoint error between computed_flow (H×W×2) and inverted gt_flow (because
+        your display code does -gt). Excludes any pixels whose computed endpoint falls
+        outside the image extents.
         """
         if computed_flow is None or gt_flow is None:
             return np.nan
 
-        # ground truth shape
-        H, W, _ = gt_flow.shape
+        H, W, _ = computed_flow.shape
+        # flatten flows
+        c = computed_flow.reshape(-1, 2)      # computed dx,dy
+        g = gt_flow.reshape(-1, 2)            # ground truth dx,dy (we'll invert below)
 
-        # --- DENSE case ---
-        if computed_flow.ndim == 3 and computed_flow.shape[2] == 2:
-            # flatten
-            c = computed_flow.reshape(-1, 2)
-            g = gt_flow.reshape(-1, 2)
+        # build pixel coordinates
+        ys, xs = np.indices((H, W))
+        ys = ys.reshape(-1)
+        xs = xs.reshape(-1)
 
-            ys, xs = np.indices((H, W))
-            ys = ys.ravel(); xs = xs.ravel()
+        # compute final positions
+        final_x = xs + c[:,0]
+        final_y = ys + c[:,1]
 
-            final_x = xs + c[:,0]
-            final_y = ys + c[:,1]
-            mask = (
-                (final_x >= 0) & (final_x < W) &
-                (final_y >= 0) & (final_y < H)
-            )
-            if not np.any(mask):
-                return np.nan
+        # keep only those inside [0, W-1] and [0, H-1]
+        mask = (
+            (final_x >= 0) & (final_x < W) &
+            (final_y >= 0) & (final_y < H)
+        )
+        if not np.any(mask):
+            return np.nan
 
-            diffs = c[mask] - (-g[mask])
-            errs  = np.linalg.norm(diffs, axis=1)
-            return np.mean(errs)
-
-        # --- SPARSE case (N×4: x, y, dx, dy) ---
-        if computed_flow.ndim == 2 and computed_flow.shape[1] == 4:
-            pts0 = computed_flow[:, :2]
-            disp = computed_flow[:, 2:4]
-
-            errors = []
-            for (x0, y0), (dx, dy) in zip(pts0, disp):
-                xi = int(round(x0)); yi = int(round(y0))
-                # skip if point outside
-                if xi < 0 or xi >= W or yi < 0 or yi >= H:
-                    continue
-                gt_dx, gt_dy = gt_flow[yi, xi]
-                # endpoint error: computed (dx,dy) vs inverted gt (-gt_dx,-gt_dy)
-                err = np.hypot(dx - (-gt_dx), dy - (-gt_dy))
-                errors.append(err)
-
-            return np.mean(errors) if errors else np.nan
-
-        # unknown format
-        return np.nan
+        # endpoint error = L2 between computed (dx,dy) and inverted gt (-gt_dx, -gt_dy)
+        diffs = c[mask] - (-g[mask])
+        errs  = np.linalg.norm(diffs, axis=1)
+        return np.mean(errs)
 
 
     def grid_search_multi(self, root_folder, algorithm, param_defs, csv_path):
@@ -598,9 +452,25 @@ class OpticalFlowPage(ttk.Frame):
 
         print(f"[+] grid search done → {csv_path}")
 
+
+# ——— USAGE ———
 if __name__ == "__main__":
+    root = r"oct_dataset"
+    farneback_grid = {
+        'pyr_scale':  [0.3, 0.5, 0.7],
+        'levels':     [1,   3,   5],
+        'winsize':    [9,  15,  21],
+        'iterations': [1,   3,   5],
+        'poly_n':     [5,   7],
+        'poly_sigma': [1.1, 1.5]
+    }
+
     page = OpticalFlowPage(parent=None)
-    page.test_algorithms(
-        root_folder = "oct_dataset",
-        csv_path    = "algorithm_performance.csv"
+    page.grid_search_multi(
+        root_folder=root,
+        algorithm='Farneback',
+        param_defs=farneback_grid,
+        csv_path='farneback_results.csv'
     )
+
+
