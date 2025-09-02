@@ -1,0 +1,13 @@
+{
+  "sample_idx": 24,
+  "struct_sigma": 8.491849830802227,
+  "speckle_scale": 0.18093376949613516,
+  "magnitude": 475.20340811857363,
+  "smoothness": 20,
+  "speckle_contrast": 4.0,
+  "image_size": [
+    360,
+    360
+  ],
+  "n_frames": 9
+}

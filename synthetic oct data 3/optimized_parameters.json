@@ -1,0 +1,30 @@
+{
+  "TVL1": {
+    "tau": 0.25,
+    "lambda_": 0.15,
+    "theta": 0.3,
+    "nscales": 4,
+    "warps": 5,
+    "epsilon": 0.02
+  },
+  "DIS": {
+    "finest_scale": 0,
+    "patch_size": 4,
+    "patch_stride": 2,
+    "grad_descent_iter": 12,
+    "var_refine_iter": 3,
+    "var_refine_alpha": 20.0,
+    "var_refine_delta": 5.0,
+    "var_refine_gamma": 10.0,
+    "use_mean_normalization": true,
+    "use_spatial_propagation": false
+  },
+  "Farneback": {
+    "pyr_scale": 0.3,
+    "levels": 3,
+    "winsize": 15,
+    "iterations": 1,
+    "poly_n": 5,
+    "poly_sigma": 1.1
+  }
+}
