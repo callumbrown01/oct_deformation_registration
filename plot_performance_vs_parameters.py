@@ -14,6 +14,9 @@ param_csv = os.path.join(base_dir, "all_sample_parameters.csv")
 perf_df = pd.read_csv(perf_csv)
 param_df = pd.read_csv(param_csv)
 
+# Filter out Lucas-Kanade
+perf_df = perf_df[perf_df['algorithm'] != 'Lucas-Kanade']
+
 # Ensure both merge keys are strings and match sample naming
 perf_df["sample"] = perf_df["sample"].astype(str)
 param_df["sample_idx"] = param_df["sample_idx"].astype(int)
@@ -95,49 +98,158 @@ plt.subplots_adjust(right=0.94)
 plt.savefig(os.path.join(base_dir, "2_correlation_epe_vs_parameters.png"), bbox_inches='tight', dpi=300)
 plt.close()
 
-# 3. Combined EPE and MSE performance using grouped bars with MSE on secondary axis
-avg_perf = merged.groupby("algorithm")[["avg_epe", "avg_mse"]].mean()
+# 3. Combined EPE and Pixel Correlation performance - better visualization approaches
+avg_perf = merged.groupby("algorithm")[["avg_epe", "avg_pixel_corr"]].mean()
 
 # Load actual data performance (real_data_performance.csv) from synthetic oct data 3
 real_perf_path = os.path.join(base_dir, "real_data_performance.csv")
 if os.path.exists(real_perf_path):
     real_df = pd.read_csv(real_perf_path)
-    avg_real_mse = real_df.groupby("algorithm")["mse"].mean()
+    # Filter out Lucas-Kanade from real data too
+    real_df = real_df[real_df['algorithm'] != 'Lucas-Kanade']
+    avg_real_pixel_corr = real_df.groupby("algorithm")["algorithm_pixel_corr"].mean()
 else:
-    avg_real_mse = None
+    avg_real_pixel_corr = None
 
-fig, ax = plt.subplots(figsize=(12, 6))
-x = np.arange(len(avg_perf.index))
-width = 0.35
+# Option 1: Scatter plot showing relationship between synthetic and actual performance
+if avg_real_pixel_corr is not None:
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Left plot: Raw values comparison
+    algorithms_list = list(avg_perf.index)
+    x_pos = np.arange(len(algorithms_list))
+    
+    # Plot EPE (inverted for better comparison - lower EPE = better)
+    ax1_twin = ax1.twinx()
+    bars1 = ax1.bar(x_pos - 0.2, avg_perf["avg_epe"], 0.4, label='EPE (synthetic)', color='lightcoral', alpha=0.7)
+    
+    # Plot pixel correlations
+    bars2 = ax1_twin.bar(x_pos + 0.2, avg_perf["avg_pixel_corr"], 0.4, label='PC (synthetic)', color='lightblue', alpha=0.7)
+    avg_real_pixel_corr_ordered = avg_real_pixel_corr.reindex(avg_perf.index)
+    bars3 = ax1_twin.bar(x_pos + 0.2, avg_real_pixel_corr_ordered, 0.4, label='PC (actual)', color='darkblue', alpha=0.7, bottom=avg_perf["avg_pixel_corr"])
+    
+    ax1.set_xlabel("Algorithm")
+    ax1.set_ylabel("Average EPE", color='red')
+    ax1_twin.set_ylabel("Pixel Correlation", color='blue')
+    ax1.set_title("Raw Performance Metrics Comparison")
+    ax1.set_xticks(x_pos)
+    ax1.set_xticklabels(algorithms_list, rotation=45)
+    ax1.grid(True, alpha=0.3)
+    
+    # Combine legends
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax1_twin.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+    
+    # Right plot: Scatter plot showing synthetic vs actual pixel correlation
+    avg_real_pixel_corr_ordered = avg_real_pixel_corr.reindex(avg_perf.index)
+    colors = plt.cm.Set3(np.linspace(0, 1, len(algorithms_list)))
+    
+    for i, alg in enumerate(algorithms_list):
+        ax2.scatter(avg_perf.loc[alg, "avg_pixel_corr"], 
+                   avg_real_pixel_corr_ordered[alg], 
+                   label=alg, s=100, color=colors[i], alpha=0.7, edgecolors='black')
+    
+    # Add diagonal line for perfect correlation
+    min_val = min(avg_perf["avg_pixel_corr"].min(), avg_real_pixel_corr_ordered.min())
+    max_val = max(avg_perf["avg_pixel_corr"].max(), avg_real_pixel_corr_ordered.max())
+    ax2.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, label='Perfect correlation')
+    
+    ax2.set_xlabel("Pixel Correlation (Synthetic Data)")
+    ax2.set_ylabel("Pixel Correlation (Actual Data)")
+    ax2.set_title("Synthetic vs Actual Performance Correlation")
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(base_dir, "3a_performance_comparison_detailed.png"), bbox_inches='tight', dpi=300)
+    plt.close()
 
-bars1 = ax.bar(x - width/2, avg_perf["avg_epe"], width, label='Average EPE', color='skyblue')
+# Option 2: Ranking comparison
+fig, ax = plt.subplots(figsize=(12, 8))
+
+# Create rankings for each metric - invert EPE so lower values get better (higher) ranks
+epe_rank = avg_perf["avg_epe"].rank(ascending=True)  # Lower EPE = better rank
+synthetic_pc_rank = avg_perf["avg_pixel_corr"].rank(ascending=False)  # Higher PC = better rank
+
+if avg_real_pixel_corr is not None:
+    avg_real_pixel_corr_ordered = avg_real_pixel_corr.reindex(avg_perf.index)
+    actual_pc_rank = avg_real_pixel_corr_ordered.rank(ascending=False)
+    
+    # Plot rankings - invert EPE ranks to show better performance as higher bars
+    x_pos = np.arange(len(avg_perf.index))
+    width = 0.25
+    
+    # Invert EPE ranking so better (lower EPE) appears higher
+    inverted_epe_rank = (len(avg_perf.index) + 1) - epe_rank
+    
+    bars1 = ax.bar(x_pos - width, inverted_epe_rank, width, label='EPE Performance (synthetic)', color='lightcoral', alpha=0.8)
+    bars2 = ax.bar(x_pos, synthetic_pc_rank, width, label='PC Ranking (synthetic)', color='lightblue', alpha=0.8)
+    bars3 = ax.bar(x_pos + width, actual_pc_rank, width, label='PC Ranking (actual)', color='darkblue', alpha=0.8)
+    
+    # Add value labels on bars
+    for bars, values in [(bars1, inverted_epe_rank), (bars2, synthetic_pc_rank), (bars3, actual_pc_rank)]:
+        for bar, val in zip(bars, values):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
+                   f'{int(val)}', ha='center', va='bottom', fontsize=9)
+
 ax.set_xlabel("Algorithm")
-ax.set_ylabel("Average EPE", color='skyblue')
-ax.set_title("Average Performance: EPE and MSE by Algorithm")
-ax.set_xticks(x)
+ax.set_ylabel("Performance Ranking (Higher = Better)")
+ax.set_title("Algorithm Performance Rankings\n(Higher bars = better performance)")
+ax.set_xticks(x_pos)
 ax.set_xticklabels(avg_perf.index, rotation=45)
-ax.grid(True, alpha=0.3)
-ax.tick_params(axis='y', labelcolor='skyblue')
-
-# Secondary axis for MSE
-ax2 = ax.twinx()
-bars2 = ax2.bar(x + width/2, avg_perf["avg_mse"], width, label='Average MSE (synthetic)', color='lightcoral')
-ax2.set_ylabel("Average MSE", color='lightcoral')
-ax2.tick_params(axis='y', labelcolor='lightcoral')
-
-# Add actual data MSE as a line
-if avg_real_mse is not None:
-    avg_real_mse_ordered = avg_real_mse.reindex(avg_perf.index)
-    ax2.plot(x, avg_real_mse_ordered, label='Average MSE (actual)', color='black', marker='o', linewidth=2)
-
-# Move legend outside the plot
-lines1, labels1 = ax.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax.legend(lines1 + lines2, labels1 + labels2, bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
+ax.legend()
+ax.grid(True, alpha=0.3, axis='y')
+ax.set_ylim(0, len(avg_perf.index) + 0.5)
 
 plt.tight_layout()
-plt.savefig(os.path.join(base_dir, "3_combined_performance_epe_mse.png"), bbox_inches='tight', dpi=300)
+plt.savefig(os.path.join(base_dir, "3b_performance_rankings.png"), bbox_inches='tight', dpi=300)
 plt.close()
+
+# Option 3: Radar/Spider chart for comprehensive comparison
+if avg_real_pixel_corr is not None:
+    from math import pi
+    
+    # Prepare data for radar chart
+    algorithms_subset = avg_perf.index[:4]  # Show top 4 algorithms to avoid clutter
+    
+    # Normalize metrics to 0-1 scale for radar chart
+    epe_norm = 1 - (avg_perf["avg_epe"] - avg_perf["avg_epe"].min()) / (avg_perf["avg_epe"].max() - avg_perf["avg_epe"].min())  # Invert EPE
+    synthetic_pc_norm = (avg_perf["avg_pixel_corr"] - avg_perf["avg_pixel_corr"].min()) / (avg_perf["avg_pixel_corr"].max() - avg_perf["avg_pixel_corr"].min())
+    avg_real_pixel_corr_ordered = avg_real_pixel_corr.reindex(avg_perf.index)
+    actual_pc_norm = (avg_real_pixel_corr_ordered - avg_real_pixel_corr_ordered.min()) / (avg_real_pixel_corr_ordered.max() - avg_real_pixel_corr_ordered.min())
+    
+    # Set up radar chart
+    categories = ['EPE\n(inverted)', 'PC (synthetic)', 'PC (actual)']
+    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(projection='polar'))
+    
+    angles = [n / float(len(categories)) * 2 * pi for n in range(len(categories))]
+    angles += angles[:1]  # Complete the circle
+    
+    colors = plt.cm.Set2(np.linspace(0, 1, len(algorithms_subset)))
+    
+    for i, alg in enumerate(algorithms_subset):
+        values = [
+            epe_norm[alg],
+            synthetic_pc_norm[alg], 
+            actual_pc_norm[alg]
+        ]
+        values += values[:1]  # Complete the circle
+        
+        ax.plot(angles, values, 'o-', linewidth=2, label=alg, color=colors[i])
+        ax.fill(angles, values, alpha=0.25, color=colors[i])
+    
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(categories)
+    ax.set_ylim(0, 1)
+    ax.set_title("Algorithm Performance Radar Chart\n(Outer edge = better performance)", y=1.08)
+    ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.0))
+    ax.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(base_dir, "3c_performance_radar.png"), bbox_inches='tight', dpi=300)
+    plt.close()
 
 # 4. Compare algorithmic performance of each sample against its magnitude of deformation
 plt.figure(figsize=(20, 8))
@@ -162,33 +274,30 @@ plt.tight_layout()
 plt.savefig(os.path.join(base_dir, "4_epe_vs_magnitude.png"), bbox_inches='tight', dpi=300)
 plt.close()
 
-# 4. Compare algorithmic performance of each sample against its magnitude of deformation (actual data)
+# 4. Compare algorithmic performance of each sample against its deformation pixel correlation (actual data)
 real_perf_path = os.path.join(base_dir, "real_data_performance.csv")
 if os.path.exists(real_perf_path):
     real_df = pd.read_csv(real_perf_path)
-    # Use magnitude (visually implied) from the real data CSV
-    avg_mse_per_sample = real_df.groupby("sample")["mse"].mean()
-    magnitude_map = real_df.set_index("sample")["magnitude (visually implied)"].to_dict()
-    # Map magnitude to numeric for plotting (low=0, medium=0.5, high=1)
-    mag_numeric = {"low": 0, "medium": 0.5, "high": 1}
-    norm_magnitude = pd.Series([mag_numeric.get(magnitude_map[sample], np.nan) for sample in avg_mse_per_sample.index], index=avg_mse_per_sample.index)
+    # Filter out Lucas-Kanade
+    real_df = real_df[real_df['algorithm'] != 'Lucas-Kanade']
+    avg_pixel_corr_per_sample = real_df.groupby("sample")["algorithm_pixel_corr"].mean()
+    avg_deformation_pixel_corr = real_df.groupby("sample")["deformation_pixel_corr"].mean()
 
     plt.figure(figsize=(20, 8))
     ax = plt.gca()
-    avg_mse_per_sample.plot(kind="bar", ax=ax, width=0.7, color="lightcoral", label="Average MSE (actual)")
-    ax.set_ylabel("Average MSE (actual data)")
+    avg_pixel_corr_per_sample.plot(kind="bar", ax=ax, width=0.7, color="lightgreen", label="Average Pixel Corr (actual)")
+    ax.set_ylabel("Average Pixel Correlation (actual data)")
     ax.set_xlabel("Sample")
-    ax.set_title("Average MSE per Sample (actual data) vs Magnitude of Deformation (visually implied)")
+    ax.set_title("Average Pixel Correlation per Sample (actual data) vs Deformation Pixel Correlation")
     ax.grid(True, alpha=0.3)
 
-    # Overlay normalized magnitude as a line
-    ax2 = ax.twinx()
-    lh, = ax2.plot(range(len(norm_magnitude)), norm_magnitude, label="Magnitude (norm)", color="orange", marker='o', linestyle='--', linewidth=2)
-    ax2.set_ylabel("Normalized Magnitude (visually implied)")
-    ax2.legend([lh], ["Magnitude (norm)"], loc='upper right')
+    # Add deformation pixel correlation as a line on the same axis
+    ax.plot(range(len(avg_deformation_pixel_corr)), avg_deformation_pixel_corr, label="Deformation Pixel Corr", color="purple", marker='o', linestyle='--', linewidth=2)
+    ax.legend(loc='upper right')
     plt.xticks(rotation=90)
     plt.tight_layout()
-    plt.savefig(os.path.join(base_dir, "4_actual_mse_vs_magnitude.png"), bbox_inches='tight', dpi=300)
+    plt.savefig(os.path.join(base_dir, "5_final_pixel_corr_vs_deformation_pixel_corr.png"), bbox_inches='tight', dpi=300)
     plt.close()
+
 
 print("All plots saved to", base_dir)

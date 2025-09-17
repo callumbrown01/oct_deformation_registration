@@ -45,14 +45,6 @@ class AlgorithmOptimizer:
         
         # Reduced parameter grids for faster optimization
         self.param_grids = {
-            'TVL1': {
-                'tau': [0.1, 0.25, 0.5],
-                'lambda_': [0.05, 0.15, 0.3],
-                'theta': [0.3, 0.5],
-                'nscales': [3, 4],
-                'warps': [3, 5],
-                'epsilon': [0.01, 0.02]
-            },
             'DIS': {
                 'finest_scale': [0, 1],
                 'patch_size': [4, 8],
@@ -333,7 +325,7 @@ def main():
     
     # Initialize optimizer with three-factor scoring
     optimizer = AlgorithmOptimizer(
-        synthetic_root="synthetic oct data 3",
+        synthetic_root="synthetic oct data 4",
         real_root=None,  # Set to real data path when available
         weight_s_epe=0.4,    # Synthetic EPE weight
         weight_s_mse=0.3,    # Synthetic MSE weight  
