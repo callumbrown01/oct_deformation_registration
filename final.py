@@ -1,3 +1,5 @@
+# ---- Overlay Attenuation Response Range ----
+# Constants removed - using dynamic ranges now
 #!/usr/bin/env python3
 import os
 import re
@@ -14,6 +16,17 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import mplcursors
 import glob
 from tracking_algorithms import TrackingAlgorithms
+
+def block_average(data, size=3):
+    # Use uniform_filter for block mean, preserve NaN as much as possible
+    valid_mask = np.isfinite(data)
+    data_filled = np.where(valid_mask, data, 0)
+    count = ndimage.uniform_filter(valid_mask.astype(float), size=size, mode='nearest')
+    summed = ndimage.uniform_filter(data_filled, size=size, mode='nearest')
+    with np.errstate(invalid='ignore'):
+        avg = summed / count
+    avg[count < 1e-3] = np.nan
+    return avg
 
 # ------------------------------- helpers --------------------------------------
 def compose_flows(fwd_0_to_kminus1, fwd_kminus1_to_k):
@@ -36,11 +49,9 @@ def compose_flows(fwd_0_to_kminus1, fwd_kminus1_to_k):
 
 # ------------------------------ main widget -----------------------------------
 class StressAttenuationExplorer(ttk.Frame):
-    """
-    OCT Deformation Tracking Suite for analyzing stress-attenuation relationships
-    """
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
+        # Min/max filters removed - using dynamic scaling
 
         # ── Root layout using PanedWindow for better resizing
         root_panes = ttk.Panedwindow(self, orient='horizontal')
@@ -96,10 +107,8 @@ class StressAttenuationExplorer(ttk.Frame):
         self.overlay_resp_var  = tk.BooleanVar(value=True)
         self.show_headtail_var = tk.BooleanVar(value=False)
         self.show_net_var      = tk.BooleanVar(value=False)
-        self.sensitivity = tk.DoubleVar(value=9.0)
-        self.mask_threshold_high = tk.DoubleVar(value=5.5)
-        self.mask_min_area = tk.IntVar(value=12)
-        self.att_smoothing = tk.DoubleVar(value=0.5)
+        # Unused variables removed for cleaner code
+
 
         ttk.Checkbutton(overlays, text="Attenuation",
                         variable=self.overlay_att_var,
@@ -118,87 +127,25 @@ class StressAttenuationExplorer(ttk.Frame):
                         variable=self.show_net_var,
                         command=self._refresh_display).pack(anchor='w')
 
-        # Attenuation/Stress Analysis subsection
-        att_str_frame = ttk.Labelframe(overlays, text="Attenuation/Stress Analysis", padding=6)
-        att_str_frame.pack(fill='x', pady=8)
-        
-        # Sensitivity slider
-        sensitivity_frame = ttk.Frame(att_str_frame)
-        sensitivity_frame.pack(fill='x', pady=2)
-        ttk.Label(sensitivity_frame, text="Sensitivity: Low").pack(side='left')
-        sensitivity_slider = ttk.Scale(
-            sensitivity_frame,
-            from_=0.1, to=10.0,
-            variable=self.sensitivity,
-            orient='horizontal',
-            command=lambda _: self._refresh_display()
-        )
-        sensitivity_slider.pack(side='left', fill='x', expand=True, padx=4)
-        ttk.Label(sensitivity_frame, text="High").pack(side='left')
-
-        # Attenuation smoothing slider
-        att_smooth_frame = ttk.Frame(att_str_frame)
-        att_smooth_frame.pack(fill='x', pady=2)
-        ttk.Label(att_smooth_frame, text="Att. Smoothing: None").pack(side='left')
-        att_smooth_slider = ttk.Scale(
-            att_smooth_frame,
-            from_=0.0, to=3.0,
-            variable=self.att_smoothing,
-            orient='horizontal',
-            command=lambda _: self._refresh_display()
-        )
-        att_smooth_slider.pack(side='left', fill='x', expand=True, padx=4)
-        ttk.Label(att_smooth_frame, text="Strong").pack(side='left')
-
-        # Masking Controls subsection
-        mask_frame = ttk.Labelframe(overlays, text="Masking Controls", padding=6)
-        mask_frame.pack(fill='x', pady=8)
-
-        # Mask range (threshold high) slider
-        mask_range_frame = ttk.Frame(mask_frame)
-        mask_range_frame.pack(fill='x', pady=2)
-        ttk.Label(mask_range_frame, text="Mask Range: Low").pack(side='left')
-        mask_range_slider = ttk.Scale(
-            mask_range_frame,
-            from_=1.0, to=15.0,
-            variable=self.mask_threshold_high,
-            orient='horizontal',
-            command=lambda _: self._refresh_display()
-        )
-        mask_range_slider.pack(side='left', fill='x', expand=True, padx=4)
-        ttk.Label(mask_range_frame, text="High").pack(side='left')
-
-        # Mask sensitivity (min area) slider
-        mask_sensitivity_frame = ttk.Frame(mask_frame)
-        mask_sensitivity_frame.pack(fill='x', pady=2)
-        ttk.Label(mask_sensitivity_frame, text="Mask Sensitivity: Low").pack(side='left')
-        mask_sensitivity_slider = ttk.Scale(
-            mask_sensitivity_frame,
-            from_=5, to=50,
-            variable=self.mask_min_area,
-            orient='horizontal',
-            command=lambda _: self._refresh_display()
-        )
-        mask_sensitivity_slider.pack(side='left', fill='x', expand=True, padx=4)
-        ttk.Label(mask_sensitivity_frame, text="High").pack(side='left')
-
         # Navigation
         nav = ttk.Frame(tools_frame)
         nav.pack(fill='x', pady=8)
         ttk.Button(nav, text="<< Prev", command=lambda: self._advance(-1)).pack(side='left')
         ttk.Button(nav, text="Next >>", command=lambda: self._advance(1)).pack(side='left', padx=6)
+        ttk.Button(nav, text="Reset Boxes", command=self._clear_box).pack(side='left', padx=6)
+        ttk.Button(nav, text="Show Histogram", command=self._show_histogram).pack(side='left', padx=6)
         self.index_label = ttk.Label(nav, text="Frame: N/A")
         self.index_label.pack(side='left', padx=8)
 
         # Scatter graph
         graph_box = ttk.Labelframe(tools_frame, text="Attenuation Response to Stress", padding=6)
         graph_box.pack(fill='both', expand=True, pady=(4,0))
-        self.fig, self.ax = plt.subplots(figsize=(4,4))
+        self.fig, self.ax = plt.subplots(figsize=(4,4.3))
         self.ax.set_aspect('equal', adjustable='box')
         self.scatter_canvas = FigureCanvasTkAgg(self.fig, master=graph_box)
         self.scatter_widget = self.scatter_canvas.get_tk_widget()
-        self.scatter_widget.pack(fill='both', expand=True)
-        self.ax.set_xlabel("Mean Stress (log₁₀ kPa)", fontsize=10)
+        self.scatter_widget.pack(anchor='n', fill='none')
+        self.ax.set_xlabel("Mean Stress (kPa)", fontsize=10)
         self.ax.set_ylabel("Mean Attenuation (mm⁻¹)", fontsize=10)
         self.ax.grid(True, linestyle='--', alpha=0.5)
         self.ax.set_facecolor("#f7f7f7")
@@ -229,7 +176,7 @@ class StressAttenuationExplorer(ttk.Frame):
         self.canvas_right.bind("<B1-Motion>", self._on_box_drag)
         self.canvas_right.bind("<ButtonRelease-1>", self._on_box_end)
 
-        # ── State
+        # State
         self.sequence_root = None
         self.images = {"oct": [], "stress": [], "att": []}
         self.scalar_images = {"stress": [], "att": []}
@@ -238,25 +185,76 @@ class StressAttenuationExplorer(ttk.Frame):
         self.incremental_flows = {}
         self.quiver_step = 20
         self.trajectory_s = []; self.trajectory_a = []
-        self.box_start = None; self.box_end = None
+        self.boxes = []  # list of (start, end, color)
+        self.colors = ['blue', 'lime', 'red', 'magenta']
+        self.current_box_idx = 0
         self._cursor = None
         self._active_canvas = None
 
         # Fixed overlay opacities
-        self._alpha_att   = 0.5
-        self._alpha_str   = 0.5
+        self._alpha_att   = 1
+        self._alpha_str   = 1
         
         # Scale and colorbar settings
         self.pixels_per_mm = 364 / 6.0  # 364 pixels = 6mm
         self._current_overlay_type = None
         self._current_overlay_data = None
 
+        # Epsilon for numerical stability
+        self.eps = 0
+
     # ------------------------------- UI helpers --------------------------------
-    def _on_overlay_toggle(self):
-        self._refresh_display()
+    # _reset_boxes method removed - functionality moved to _clear_box
 
     def _safe_get(self, seq, idx):
         return seq[idx] if 0 <= idx < len(seq) else None
+
+    def _box_means_for_frame(self, idx, xa, xb, ya, yb):
+        if idx == 0:
+            oct_img = self._safe_get(self.images["oct"], 0)
+            if oct_img is None: return None, None
+            H, W = oct_img.shape[:2]
+            s_src = self._safe_get(self.scalar_images["stress"], 0)
+            a_src = self._safe_get(self.scalar_images["att"],    0)
+            if s_src is None or a_src is None: return None, None
+            a_src = block_average(a_src)
+            xa_c = np.clip(xa, 0, W - 1); xb_c = np.clip(xb, 0, W - 1)
+            ya_c = np.clip(ya, 0, H - 1); yb_c = np.clip(yb, 0, H - 1)
+            rm = np.zeros((H, W), dtype=bool); rm[ya_c:yb_c+1, xa_c:xb_c+1] = True
+            oct_gray = oct_img if oct_img.ndim == 2 else cv2.cvtColor(oct_img, cv2.COLOR_RGB2GRAY)
+            extent_mask = (oct_gray > 0) & rm
+            if not np.any(extent_mask): return None, None
+            # Add check for valid values before mean
+            s_valid = np.where(extent_mask, s_src, np.nan)
+            a_valid = np.where(extent_mask, a_src, np.nan)
+            if not np.any(np.isfinite(s_valid)) or not np.any(np.isfinite(a_valid)):
+                return None, None
+            return (float(np.nanmean(s_valid)), float(np.nanmean(a_valid)))
+        else:
+            w_oct_i, mask_oct_i = self._warp_with_shared_flow(self._safe_get(self.images["oct"], idx), idx)
+            if w_oct_i is None or mask_oct_i is None: return None, None
+            s_src = self._safe_get(self.scalar_images["stress"], idx)
+            a_src = self._safe_get(self.scalar_images["att"],    idx)
+            if s_src is None or a_src is None: return None, None
+            s_warp, mask_s = self._warp_with_shared_flow(s_src, idx)
+            a_warp, mask_a = self._warp_with_shared_flow(a_src, idx)
+            if s_warp is None or a_warp is None: return None, None
+            a_warp = block_average(a_warp)
+            H, W = s_warp.shape[:2]
+            xa_c = np.clip(xa, 0, W - 1); xb_c = np.clip(xb, 0, W - 1)
+            ya_c = np.clip(ya, 0, H - 1); yb_c = np.clip(yb, 0, H - 1)
+            rm = np.zeros((H, W), dtype=bool); rm[ya_c:yb_c+1, xa_c:xb_c+1] = True
+            oct_gray = w_oct_i if w_oct_i.ndim == 2 else cv2.cvtColor(w_oct_i, cv2.COLOR_RGB2GRAY)
+            cmask = rm & mask_oct_i & (oct_gray > 0)
+            for m in (mask_s, mask_a):
+                if m is not None: cmask &= m
+            if not np.any(cmask): return None, None
+            # Add check for valid values before mean
+            s_valid = np.where(cmask, s_warp, np.nan)
+            a_valid = np.where(cmask, a_warp, np.nan)
+            if not np.any(np.isfinite(s_valid)) or not np.any(np.isfinite(a_valid)):
+                return None, None
+            return (float(np.nanmean(s_valid)), float(np.nanmean(a_valid)))
 
     # ------------------------------- data I/O ----------------------------------
     def _show_loading_dialog(self, message):
@@ -304,7 +302,8 @@ class StressAttenuationExplorer(ttk.Frame):
             self._load_modalities()
             self.current_idx = 0
             self.trajectory_s = []; self.trajectory_a = []
-            self.box_start = None; self.box_end = None
+            self.boxes = []
+            self.current_box_idx = 0
             self._precompute_flows()
         finally:
             loading.destroy()
@@ -319,6 +318,9 @@ class StressAttenuationExplorer(ttk.Frame):
         finally:
             loading.destroy()
         messagebox.showinfo("Flows Loaded", "Flows have been precomputed and loaded.")
+        self._refresh_display()
+
+    def _on_overlay_toggle(self):
         self._refresh_display()
 
     def _load_modalities(self):
@@ -377,15 +379,13 @@ class StressAttenuationExplorer(ttk.Frame):
             
             for i in range(num_frames):
                 slice_data = stress_array[:,:,i]
-                eps = 1e-6
-                # Ensure we have negative stress values, make them positive for log
-                stress_positive = np.abs(slice_data) + eps
-                log_stress = np.log10(stress_positive)
-                # Clamp log stress values to 0-2 range
-                log_stress = np.clip(log_stress, 0, 2)
-                self.scalar_images["stress"].append(log_stress)
-                # Convert to RGB visualization using jet colormap for log10 values 0-2
-                rgb = self._apply_colormap(log_stress, 'jet', 0, 2)
+                # Ensure stress is positive
+                stress_kpa = np.abs(slice_data)
+                # Clamp stress values to 0-100 kPa
+                stress_kpa = np.clip(stress_kpa, 0, 100)
+                self.scalar_images["stress"].append(stress_kpa)
+                # Convert to RGB visualization using jet colormap for 0-100 kPa
+                rgb = self._apply_colormap(stress_kpa, 'jet', 0, 100)
                 self.images["stress"].append(rgb)
                 
             for i in range(num_frames):
@@ -552,15 +552,12 @@ class StressAttenuationExplorer(ttk.Frame):
         if self._current_overlay_type is None:
             return
             
-        # Color bar dimensions
-        cb_width = 20
-        cb_height = 150
-        margin = 10  # Changed from 20 to 10
-        label_space = 50  # Space for labels
-        
-        # Position at top right with space for labels
-        x1 = canvas_width - margin - cb_width
-        y1 = margin
+        # Horizontal color bar at bottom left
+        cb_length = int(canvas_width * 0.4)
+        cb_height = 20
+        margin = 20
+        x1 = margin
+        y1 = canvas_height - margin - cb_height
         
         # Create color bar based on overlay type
         if self._current_overlay_type == 'attenuation':
@@ -569,113 +566,87 @@ class StressAttenuationExplorer(ttk.Frame):
             vmin, vmax = 0, 10
             unit = 'mm⁻¹'
             label = 'Attenuation (mm⁻¹)'
-            
         elif self._current_overlay_type == 'stress':
-            # Jet colormap for stress (0-2 log₁₀ kPa)
+            # Jet colormap for stress (log scale display, kPa values)
             cmap = plt.cm.jet
+            if hasattr(self, '_stress_data') and self._stress_data is not None:
+                valid_data = self._stress_data[self._stress_data > 0]
             vmin, vmax = 0, 2
-            unit = 'log₁₀ kPa'
-            label = 'Stress (log₁₀ kPa)'
-            
+            unit = 'kPa'
+            label = 'Stress (kPa) [Log Scale]'
         elif self._current_overlay_type == 'att_str_ratio':
-            # RdBu_r colormap for stability (0-1)
-            cmap = plt.cm.RdBu_r
-            vmin, vmax = 0, 1
+            # Plasma colormap for attenuation response (2nd-98th percentile linear scale)
+            cmap = plt.cm.jet
+            if hasattr(self, '_response_data') and self._response_data is not None:
+                valid_data = self._response_data[np.isfinite(self._response_data)]
+                if len(valid_data) > 0:
+                    vmin = np.percentile(valid_data, 3)
+                    vmax = np.percentile(valid_data, 97)
+                else:
+                    vmin, vmax = -1, 3
+            else:
+                vmin, vmax = -1, 3
             unit = ''
-            label = 'Attenuation Load Response (mm⁻¹/log₁₀ kPa)'
+            label = 'Attenuation Load Response (mm⁻¹/kPa) [3-97%]'
         else:
             return
         
         # Draw color bar background
-        canvas.create_rectangle(x1-2, y1-2, x1+cb_width+2, y1+cb_height+2, 
-                               fill='white', outline='black', width=1)
-        
-        # Create color gradient
-        for i in range(cb_height):
-            # Normalize position to [0,1] range
-            norm_pos = (cb_height - 1 - i) / (cb_height - 1)  # Flip y-axis
+        canvas.create_rectangle(x1-2, y1-2, x1+cb_length+2, y1+cb_height+2, fill='white', outline='black', width=1)
+        # Create horizontal color gradient
+        for i in range(cb_length):
+            norm_pos = i / (cb_length - 1)
             color_rgba = cmap(norm_pos)
             color_hex = '#{:02x}{:02x}{:02x}'.format(
                 int(color_rgba[0] * 255),
                 int(color_rgba[1] * 255),
                 int(color_rgba[2] * 255)
             )
-            canvas.create_line(x1, y1 + i, x1 + cb_width, y1 + i, fill=color_hex, width=1)
+            canvas.create_line(x1 + i, y1, x1 + i, y1 + cb_height, fill=color_hex, width=1)
         
-        # Add tick marks and labels
+        # Add tick marks and labels (horizontal, above color bar)
         num_ticks = 5
         for i in range(num_ticks):
             tick_pos = i / (num_ticks - 1)
-            y_pos = y1 + cb_height - int(tick_pos * cb_height)
+            x_pos = x1 + int(tick_pos * cb_length)
             value = vmin + tick_pos * (vmax - vmin)
-            
-            # Draw tick mark on the left side of the color bar
-            canvas.create_line(x1 - 8, y_pos, x1, y_pos, 
-                              fill='white', width=2)
-            
-            # Draw value label
-            if self._current_overlay_type == 'att_str_ratio':
-                value_text = f'{value:.1f}'
-            else:
-                value_text = f'{value:.0f}' if value == int(value) else f'{value:.1f}'
-            
-            # Draw white text to the left of the tick marks
-            text_x = x1 - 15
-            canvas.create_text(text_x, y_pos, text=value_text, 
-                              fill='white', font=('Arial', 9, 'bold'), anchor='e')
-        
-        # Add title and units in top left corner of canvas
+            # Draw tick mark above color bar
+            canvas.create_line(x_pos, y1 - 8, x_pos, y1, fill='white', width=2)
+            # Draw value label above tick
+            value_text = f'{value:.1f}' if self._current_overlay_type == 'att_str_ratio' else (f'{value:.0f}' if value == int(value) else f'{value:.1f}')
+            canvas.create_text(x_pos, y1 - 18, text=value_text, fill='white', font=('Arial', 9, 'bold'), anchor='s')
+        # Add title at left of color bar, move up to avoid overlap
         if unit:
             title_text = f'{label} ({unit})'
         else:
             title_text = label
-        canvas.create_text(10, 10, text=title_text, 
-                          fill='white', font=('Arial', 10, 'bold'), anchor='nw')
+        canvas.create_text(x1, y1 - 38, text=title_text, fill='white', font=('Arial', 10, 'bold'), anchor='sw')
 
     def _draw_grayscale_color_bar(self, canvas, canvas_width, canvas_height):
         """Draw a grayscale color bar for OCT intensity values"""
-        # Color bar dimensions
-        cb_width = 20
-        cb_height = 150
-        margin = 10  # Changed from 20 to 10
-        
-        # Position at top right
-        x1 = canvas_width - margin - cb_width
-        y1 = margin
-        
-        # Draw color bar background
-        canvas.create_rectangle(x1-2, y1-2, x1+cb_width+2, y1+cb_height+2, 
-                               fill='white', outline='black', width=1)
-        
-        # Create grayscale gradient (0-29 OCT intensity scale)
-        for i in range(cb_height):
-            # Normalize position to [0,1] range
-            norm_pos = (cb_height - 1 - i) / (cb_height - 1)  # Flip y-axis
-            # Map to 0-29 range, then convert to 0-255 for display
+        # Horizontal grayscale color bar at bottom left
+        cb_length = int(canvas_width * 0.4)
+        cb_height = 20
+        margin = 20
+        x1 = margin
+        y1 = canvas_height - margin - cb_height
+        canvas.create_rectangle(x1-2, y1-2, x1+cb_length+2, y1+cb_height+2, fill='white', outline='black', width=1)
+        for i in range(cb_length):
+            norm_pos = i / (cb_length - 1)
             oct_value = norm_pos * 29
             gray_value = int((oct_value / 29) * 255)
             color_hex = '#{:02x}{:02x}{:02x}'.format(gray_value, gray_value, gray_value)
-            canvas.create_line(x1, y1 + i, x1 + cb_width, y1 + i, fill=color_hex, width=1)
-        
-        # Add tick marks and labels
+            canvas.create_line(x1 + i, y1, x1 + i, y1 + cb_height, fill=color_hex, width=1)
         num_ticks = 5
-        vmin, vmax = 0, 29  # Changed to OCT scale
+        vmin, vmax = 0, 29
         for i in range(num_ticks):
             tick_pos = i / (num_ticks - 1)
-            y_pos = y1 + cb_height - int(tick_pos * cb_height)
+            x_pos = x1 + int(tick_pos * cb_length)
             value = vmin + tick_pos * (vmax - vmin)
-            
-            # Draw tick mark on the left side of the color bar
-            canvas.create_line(x1 - 8, y_pos, x1, y_pos, 
-                              fill='white', width=2)
-            
-            # Draw value label
+            canvas.create_line(x_pos, y1 - 8, x_pos, y1, fill='white', width=2)
             value_text = f'{value:.0f}' if value == int(value) else f'{value:.1f}'
-            
-            # Draw white text to the left of the tick marks
-            text_x = x1 - 15
-            canvas.create_text(text_x, y_pos, text=value_text, 
-                              fill='white', font=('Arial', 9, 'bold'), anchor='e')
+            canvas.create_text(x_pos, y1 - 18, text=value_text, fill='white', font=('Arial', 9, 'bold'), anchor='s')
+        canvas.create_text(x1, y1 - 38, text='OCT Intensity (0-29)', fill='white', font=('Arial', 10, 'bold'), anchor='sw')
 
     def _create_adipose_mask(self, oct_img, threshold_low=0, threshold_high=5.5, min_area=12):
         """Create mask for adipose tissue (very low signal regions in 0-29 scale)"""
@@ -775,8 +746,8 @@ class StressAttenuationExplorer(ttk.Frame):
         # Create adipose tissue mask from the base OCT image
         adipose_mask = self._create_adipose_mask(
             base_gray,
-            threshold_high=self.mask_threshold_high.get(),
-            min_area=self.mask_min_area.get()
+            threshold_high=5.5,
+            min_area=24
         )
 
         # Overlays (fixed alpha) - strictly mask to warped OCT geometry
@@ -801,9 +772,35 @@ class StressAttenuationExplorer(ttk.Frame):
         if self.overlay_att_var.get() and warped_att_rgb is not None:
             display_rgb = self._alpha_blend_masked(display_rgb, warped_att_rgb, self._alpha_att, final_mask)
             self._current_overlay_type = 'attenuation'
-        if self.overlay_str_var.get() and warped_str_rgb is not None:
-            display_rgb = self._alpha_blend_masked(display_rgb, warped_str_rgb, self._alpha_str, final_mask)
-            self._current_overlay_type = 'stress'
+        if self.overlay_str_var.get():
+            # Apply stress overlay with log scaling using scalar data
+            s_cur_scalar = self._safe_get(self.scalar_images["stress"], self.current_idx)
+            if s_cur_scalar is not None:
+                s_cur_warped, mask_s = self._warp_with_shared_flow(s_cur_scalar, self.current_idx)
+                if s_cur_warped is not None:
+                    self._stress_data = s_cur_warped  # Store for colorbar
+                    
+                    # Apply log scaling for visualization (kPa values for calculation)
+                    stress_log = np.log10(s_cur_warped + 1e-6)
+                    stress_log_clipped = np.clip(stress_log, 0, 2)  # log10(1) to log10(100)
+                    
+                    # Create RGB using log-scaled values
+                    rgb_stress = self._apply_colormap(stress_log_clipped, 'jet', 0, 2)
+                    rgba_stress = np.dstack([rgb_stress, np.full(rgb_stress.shape[:2], int(255 * self._alpha_str))])
+                    stress_img = Image.fromarray(rgba_stress.astype(np.uint8), mode='RGBA')
+                    
+                    # Apply mask and blend
+                    if final_mask is not None:
+                        # Set masked areas to transparent
+                        alpha_channel = rgba_stress[..., 3].copy()
+                        alpha_channel[~final_mask] = 0
+                        rgba_stress[..., 3] = alpha_channel
+                        stress_img = Image.fromarray(rgba_stress.astype(np.uint8), mode='RGBA')
+                    
+                    base_rgba = Image.fromarray(display_rgb).convert('RGBA')
+                    display_rgb = Image.alpha_composite(base_rgba, stress_img)
+                    display_rgb = np.array(display_rgb.convert('RGB'))
+                    self._current_overlay_type = 'stress'
 
         # --- Preload scalar maps for ratio ---
         a_ref = self._safe_get(self.scalar_images["att"], 0)
@@ -814,108 +811,95 @@ class StressAttenuationExplorer(ttk.Frame):
         # ΔAtt/ΔStr ratio overlay
         if self.overlay_resp_var.get() and self.current_idx >= 1 \
         and all(v is not None for v in (a_ref, s_ref, a_cur, s_cur)):
+
             a_ref_w, mask_a_ref = self._warp_with_shared_flow(a_ref, 0)
             s_ref_w, mask_s_ref = self._warp_with_shared_flow(s_ref, 0)
             a_cur_w, mask_a_cur = self._warp_with_shared_flow(a_cur, self.current_idx)
             s_cur_w, mask_s_cur = self._warp_with_shared_flow(s_cur, self.current_idx)
-            
+
+
             if all(v is not None for v in (a_ref_w, s_ref_w, a_cur_w, s_cur_w)):
-                # Apply NaN-aware smoothing to attenuation data to reduce speckle noise
-                def smooth_with_nan_handling(data, sigma):
-                    """Apply Gaussian smoothing while handling NaN values properly"""
-                    if sigma <= 0:
-                        return data
-                    
-                    # Create mask for valid (finite) values
-                    valid_mask = np.isfinite(data)
-                    
-                    if not np.any(valid_mask):
-                        return data  # Return original if all NaN
-                    
-                    # Create smoothed version with NaN handling
-                    smoothed_data = data.copy()
-                    
-                    # Fill NaN values with local average of valid neighbors for smoothing
-                    temp_data = data.copy()
-                    temp_data[~valid_mask] = 0  # Temporarily set NaN to 0
-                    
-                    # Apply Gaussian filter to both data and weights
-                    smoothed_values = ndimage.gaussian_filter(temp_data.astype(float), sigma=sigma)
-                    weight_sum = ndimage.gaussian_filter(valid_mask.astype(float), sigma=sigma)
-                    
-                    # Avoid division by zero
-                    weight_sum[weight_sum == 0] = 1
-                    
-                    # Calculate weighted average (only where we had valid data to smooth)
-                    result = smoothed_values / weight_sum
-                    
-                    # Preserve NaN where we had no valid neighbors to smooth with
-                    result[weight_sum < 0.1] = np.nan
-                    
-                    return result
+                # Get warped OCT for current frame to build extent_mask
+                w_oct_i, mask_oct_i = self._warp_with_shared_flow(self._safe_get(self.images["oct"], self.current_idx), self.current_idx)
                 
-                smoothing_sigma = self.att_smoothing.get()
-                a_ref_w_smooth = smooth_with_nan_handling(a_ref_w, smoothing_sigma)
-                a_cur_w_smooth = smooth_with_nan_handling(a_cur_w, smoothing_sigma)
+                # --- 3x3 block averaging for attenuation (no further smoothing) ---
+                a_ref_w_block = block_average(a_ref_w)
+                a_cur_w_block = block_average(a_cur_w)
+                d_att = (a_cur_w_block - a_ref_w_block).astype(np.float32)
+                d_str = (s_cur_w - s_ref_w).astype(np.float32)
+
+                # Calculate response r = ΔAtt/ΔStr
+                r_current = np.where(d_str > self.eps, d_att / d_str, np.nan)
+
+                # Filter for aggressive fluctuations: check change from previous frame
+                fluctuation_mask = np.ones_like(d_att, dtype=bool)
+                if self.current_idx >= 2:
+                    # Get previous frame data
+                    a_prev = self._safe_get(self.scalar_images["att"], self.current_idx - 1)
+                    s_prev = self._safe_get(self.scalar_images["stress"], self.current_idx - 1)
+                    if a_prev is not None and s_prev is not None:
+                        a_prev_w, _ = self._warp_with_shared_flow(a_prev, self.current_idx - 1)
+                        s_prev_w, _ = self._warp_with_shared_flow(s_prev, self.current_idx - 1)
+                        if a_prev_w is not None and s_prev_w is not None:
+                            a_prev_w_block = block_average(a_prev_w)
+                            d_att_prev = (a_prev_w_block - a_ref_w_block).astype(np.float32)
+                            d_str_prev = (s_prev_w - s_ref_w).astype(np.float32)
+                            r_prev = np.where(d_str_prev > self.eps, d_att_prev / d_str_prev, np.nan)
+                            
+                            # Calculate change in response
+                            dr = r_current - r_prev
+                            # Mask out where change is too aggressive (e.g., > 2.0)
+                            fluctuation_mask = np.abs(dr) <= 2.0
+
+                # Build extent_mask like in graph calculation
+                if w_oct_i is not None and mask_oct_i is not None:
+                    oct_gray = w_oct_i if w_oct_i.ndim == 2 else cv2.cvtColor(w_oct_i, cv2.COLOR_RGB2GRAY)
+                    extent_mask = (mask_oct_i) & (oct_gray > 0)
+                    for m in (mask_a_ref, mask_s_ref, mask_a_cur, mask_s_cur):
+                        if m is not None:
+                            extent_mask &= m
+                    if final_mask is not None:
+                        extent_mask &= final_mask
+                else:
+                    extent_mask = np.zeros_like(d_att, dtype=bool)
+
+                # Calculate response ratio
+                response_ratio = np.where(d_str > self.eps, d_att / d_str, np.nan)
                 
-                # Calculate changes using smoothed attenuation data
-                d_att = np.abs(a_cur_w_smooth - a_ref_w_smooth).astype(np.float32)
-                d_str = np.abs(s_cur_w - s_ref_w).astype(np.float32)
+                # Identify valid pixels
+                valid = extent_mask & np.isfinite(response_ratio)
                 
-                # Identify valid pixels (including adipose mask)
-                eps = 1e-6
-                valid = np.isfinite(d_att) & np.isfinite(d_str) & (d_str > eps)
-                if final_mask is not None: 
-                    valid &= final_mask
-                for m in (mask_a_ref, mask_s_ref, mask_a_cur, mask_s_cur):
-                    if m is not None: valid &= m
-                    
                 if np.any(valid):
-                    # Create visualization highlighting stable attenuation regions
-                    # Red: stable attenuation despite stress change (cancer)
-                    # Green: attenuation changes with stress
-                    rgba = np.zeros((*d_att.shape, 4), dtype=np.float32)
+                    self._response_data = response_ratio  # Store for colorbar and histogram
                     
-                    # Normalize changes to [0,1] range for comparison
-                    att_norm = d_att / (np.percentile(d_att[valid], 98) + eps)
-                    str_norm = d_str / (np.percentile(d_str[valid], 98) + eps)
-                    
-                    # Stability metric: low att change relative to stress change
-                    sensitivity = self.sensitivity.get()  # Get current sensitivity value
-                    stability = np.exp(-sensitivity * att_norm / (str_norm + eps))
-                    
-                    # Use warm-cold colormap for better visualization
-                    # Create RdBu_r colormap (red-white-blue reversed)
-                    # Blue = cold = unstable/changing (healthy tissue response)
-                    # Red = warm = stable (potential cancer)
-                    cmap = plt.cm.RdBu_r
-                    
-                    # Map stability values to warm-cold colors
-                    # stability = 0 (unstable/changing) -> blue (cold)
-                    # stability = 1 (stable/cancer) -> red (warm)
-                    warm_cold_colors = cmap(stability)
-                    
-                    # Extract RGB channels from warm-cold colormap
-                    rgba[..., 0] = warm_cold_colors[..., 0]  # Red
-                    rgba[..., 1] = warm_cold_colors[..., 1]  # Green  
-                    rgba[..., 2] = warm_cold_colors[..., 2]  # Blue
-                    
-                    # Alpha channel: universal transparency of 75%
-                    rgba[..., 3] = 1
-                    
-                    # Apply valid mask
-                    rgba[~valid] = 0
-                    
-                    # Convert to uint8 and create overlay
-                    rgba_uint8 = (rgba * 255.0 + 0.5).astype(np.uint8)
-                    # DeprecationWarning fix: remove 'mode' argument
-                    ratio_img = Image.fromarray(rgba_uint8).convert('RGBA')
-                    base_rgba = Image.fromarray(display_rgb).convert('RGBA')
-                    display_rgb = Image.alpha_composite(base_rgba, ratio_img)
-                    display_rgb = np.array(display_rgb.convert('RGB'))
-                    
-                    # Set overlay type for color bar
-                    self._current_overlay_type = 'att_str_ratio'
+                    # Use linear scaling with 2nd-98th percentile range
+                    response_valid = response_ratio[valid]
+                    if len(response_valid) > 0:
+                        vmin = np.percentile(response_valid, 2)
+                        vmax = np.percentile(response_valid, 98)
+                        
+                        # Apply linear scaling with percentile range
+                        response_clipped = np.clip(response_ratio, vmin, vmax)
+                        response_norm = (response_clipped - vmin) / (vmax - vmin + 1e-8)
+                        response_norm = np.clip(response_norm, 0, 1)
+                        
+                        # Apply plasma colormap
+                        rgba = np.zeros((*response_ratio.shape, 4), dtype=np.float32)
+                        cmap = plt.cm.jet
+                        colors = cmap(response_norm)
+                        rgba[..., 0] = colors[..., 0]
+                        rgba[..., 1] = colors[..., 1]
+                        rgba[..., 2] = colors[..., 2]
+                        rgba[..., 3] = 1
+                        rgba[~valid] = 0
+                        
+                        rgba_uint8 = (rgba * 255.0 + 0.5).astype(np.uint8)
+                        ratio_img = Image.fromarray(rgba_uint8).convert('RGBA')
+                        base_rgba = Image.fromarray(display_rgb).convert('RGBA')
+                        display_rgb = Image.alpha_composite(base_rgba, ratio_img)
+                        display_rgb = np.array(display_rgb.convert('RGB'))
+                        self._current_overlay_type = 'att_str_ratio'
+                        self._current_overlay_data = response_ratio
 
         self._draw_on_canvas(self.canvas_right, display_rgb, cumulative_flow,
                              show_headtail=self.show_headtail_var.get(),
@@ -934,22 +918,7 @@ class StressAttenuationExplorer(ttk.Frame):
                 a_src = self._safe_get(self.scalar_images["att"],    0)
                 if s_src is None or a_src is None: return None, None
                 s_arr = s_src
-                a_arr = a_src
-                
-                # Apply smoothing to attenuation data for graph consistency
-                smoothing_sigma = self.att_smoothing.get()
-                if smoothing_sigma > 0:
-                    # Use the same NaN-aware smoothing as in the overlay
-                    valid_mask = np.isfinite(a_arr)
-                    if np.any(valid_mask):
-                        temp_data = a_arr.copy()
-                        temp_data[~valid_mask] = 0
-                        smoothed_values = ndimage.gaussian_filter(temp_data.astype(float), sigma=smoothing_sigma)
-                        weight_sum = ndimage.gaussian_filter(valid_mask.astype(float), sigma=smoothing_sigma)
-                        weight_sum[weight_sum == 0] = 1
-                        result = smoothed_values / weight_sum
-                        result[weight_sum < 0.1] = np.nan
-                        a_arr = result
+                a_arr = block_average(a_src)
             else:
                 w_oct_i, mask_oct_i = self._warp_with_shared_flow(self._safe_get(self.images["oct"], idx), idx)
                 if w_oct_i is None or mask_oct_i is None: return None, None
@@ -959,21 +928,7 @@ class StressAttenuationExplorer(ttk.Frame):
                 s_arr, mask_s = self._warp_with_shared_flow(s_src, idx)
                 a_arr, mask_a = self._warp_with_shared_flow(a_src, idx)
                 if s_arr is None or a_arr is None: return None, None
-                
-                # Apply smoothing to attenuation data for graph consistency
-                smoothing_sigma = self.att_smoothing.get()
-                if smoothing_sigma > 0:
-                    # Use the same NaN-aware smoothing as in the overlay
-                    valid_mask = np.isfinite(a_arr)
-                    if np.any(valid_mask):
-                        temp_data = a_arr.copy()
-                        temp_data[~valid_mask] = 0
-                        smoothed_values = ndimage.gaussian_filter(temp_data.astype(float), sigma=smoothing_sigma)
-                        weight_sum = ndimage.gaussian_filter(valid_mask.astype(float), sigma=smoothing_sigma)
-                        weight_sum[weight_sum == 0] = 1
-                        result = smoothed_values / weight_sum
-                        result[weight_sum < 0.1] = np.nan
-                        a_arr = result
+                a_arr = block_average(a_arr)
                 
                 oct_gray = w_oct_i if w_oct_i.ndim == 2 else cv2.cvtColor(w_oct_i, cv2.COLOR_RGB2GRAY)
                 extent_mask = (mask_oct_i) & (oct_gray > 0)
@@ -991,61 +946,19 @@ class StressAttenuationExplorer(ttk.Frame):
                 self.trajectory_a.append(a_mean)
 
         # Box trajectories
-        box_trajectory_s, box_trajectory_a = [], []
-        if self.box_start and self.box_end:
-            xa, xb = sorted([int(self.box_start[0]), int(self.box_end[0])])
-            ya, yb = sorted([int(self.box_start[1]), int(self.box_end[1])])
-
-            def _box_means_for_frame(idx):
-                if idx == 0:
-                    oct_img = self._safe_get(self.images["oct"], 0)
-                    if oct_img is None: return None, None
-                    H, W = oct_img.shape[:2]
-                    s_src = self._safe_get(self.scalar_images["stress"], 0)
-                    a_src = self._safe_get(self.scalar_images["att"],    0)
-                    if s_src is None or a_src is None: return None, None
-                    xa_c = np.clip(xa, 0, W - 1); xb_c = np.clip(xb, 0, W - 1)
-                    ya_c = np.clip(ya, 0, H - 1); yb_c = np.clip(yb, 0, H - 1)
-                    rm = np.zeros((H, W), dtype=bool); rm[ya_c:yb_c+1, xa_c:xb_c+1] = True
-                    oct_gray = oct_img if oct_img.ndim == 2 else cv2.cvtColor(oct_img, cv2.COLOR_RGB2GRAY)
-                    extent = (oct_gray > 0) & rm
-                    if not np.any(extent): return None, None
-                    # Add check for valid values before mean
-                    s_valid = np.where(extent, s_src, np.nan)
-                    a_valid = np.where(extent, a_src, np.nan)
-                    if not np.any(np.isfinite(s_valid)) or not np.any(np.isfinite(a_valid)):
-                        return None, None
-                    return (float(np.nanmean(s_valid)), float(np.nanmean(a_valid)))
-                else:
-                    w_oct_i, mask_oct_i = self._warp_with_shared_flow(self._safe_get(self.images["oct"], idx), idx)
-                    if w_oct_i is None or mask_oct_i is None: return None, None
-                    s_src = self._safe_get(self.scalar_images["stress"], idx)
-                    a_src = self._safe_get(self.scalar_images["att"],    idx)
-                    if s_src is None or a_src is None: return None, None
-                    s_warp, mask_s = self._warp_with_shared_flow(s_src, idx)
-                    a_warp, mask_a = self._warp_with_shared_flow(a_src, idx)
-                    if s_warp is None or a_warp is None: return None, None
-                    H, W = s_warp.shape[:2]
-                    xa_c = np.clip(xa, 0, W - 1); xb_c = np.clip(xb, 0, W - 1)
-                    ya_c = np.clip(ya, 0, H - 1); yb_c = np.clip(yb, 0, H - 1)
-                    rm = np.zeros((H, W), dtype=bool); rm[ya_c:yb_c+1, xa_c:xb_c+1] = True
-                    oct_gray = w_oct_i if w_oct_i.ndim == 2 else cv2.cvtColor(w_oct_i, cv2.COLOR_RGB2GRAY)
-                    cmask = rm & mask_oct_i & (oct_gray > 0)
-                    for m in (mask_s, mask_a):
-                        if m is not None: cmask &= m
-                    if not np.any(cmask): return None, None
-                    # Add check for valid values before mean
-                    s_valid = np.where(cmask, s_warp, np.nan)
-                    a_valid = np.where(cmask, a_warp, np.nan)
-                    if not np.any(np.isfinite(s_valid)) or not np.any(np.isfinite(a_valid)):
-                        return None, None
-                    return (float(np.nanmean(s_valid)), float(np.nanmean(a_valid)))
-
-            for idx in range(0, self.current_idx + 1):
-                bs, ba = _box_means_for_frame(idx)
-                if bs is not None and ba is not None:
-                    box_trajectory_s.append(bs)
-                    box_trajectory_a.append(ba)
+        box_trajectories = []
+        for box in self.boxes:
+            start, end, color = box
+            if start and end:
+                xa, xb = sorted([int(start[0]), int(end[0])])
+                ya, yb = sorted([int(start[1]), int(end[1])])
+                trajectory_s, trajectory_a = [], []
+                for idx in range(0, self.current_idx + 1):
+                    bs, ba = self._box_means_for_frame(idx, xa, xb, ya, yb)
+                    if bs is not None and ba is not None:
+                        trajectory_s.append(bs)
+                        trajectory_a.append(ba)
+                box_trajectories.append((trajectory_s, trajectory_a, color))
 
         # ── Scatter refresh
         self.ax.clear()
@@ -1056,38 +969,42 @@ class StressAttenuationExplorer(ttk.Frame):
             if self.current_idx < len(self.trajectory_s):
                 current_s = self.trajectory_s[self.current_idx]
                 current_a = self.trajectory_a[self.current_idx]
-                self.ax.plot(current_s, current_a, "o", color="red", markersize=8, markerfacecolor="red", markeredgecolor="darkred", markeredgewidth=2, label="Current Frame")
+                self.ax.plot(current_s, current_a, "o", color="red", markersize=7, markerfacecolor="red", markeredgecolor="darkred", markeredgewidth=1, label="Current Frame")
         
-        if box_trajectory_s and box_trajectory_a:
-            # Plot all points in the box trajectory
-            self.ax.plot(box_trajectory_s, box_trajectory_a, "-s", alpha=0.9, label="Box", color="#d55e00", markersize=7)
-            # Highlight current frame if we have data
-            if self.current_idx < len(box_trajectory_s):
-                current_box_s = box_trajectory_s[self.current_idx]
-                current_box_a = box_trajectory_a[self.current_idx]
-                self.ax.plot(current_box_s, current_box_a, "s", color="red", markersize=8, markerfacecolor="red", markeredgecolor="darkred", markeredgewidth=2)
+        for i, (trajectory_s, trajectory_a, color) in enumerate(box_trajectories):
+            if trajectory_s and trajectory_a:
+                # Plot all points in the box trajectory
+                self.ax.plot(trajectory_s, trajectory_a, "-s", alpha=0.9, label=f"Box {i+1}", color=color, markersize=6)
+                # Highlight current frame if we have data
+                if self.current_idx < len(trajectory_s):
+                    current_box_s = trajectory_s[self.current_idx]
+                    current_box_a = trajectory_a[self.current_idx]
+                    self.ax.plot(current_box_s, current_box_a, "s", color="red", markersize=7, markerfacecolor="red", markeredgecolor="darkred", markeredgewidth=1)
         
-        self.ax.set_xlabel("Mean Stress (log₁₀ kPa)", fontsize=11)
+        self.ax.set_xlabel("Mean Stress (kPa)", fontsize=11)
         self.ax.set_ylabel("Mean Attenuation (mm⁻¹)", fontsize=11)
         self.ax.grid(True, linestyle='--', alpha=0.5)
         self.ax.set_facecolor("#f7f7f7")
         self.ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2, fontsize=10)
 
-        # Ensure the graph fits within the canvas at all times
+        # Ensure the graph fits within the canvas at all times and remains square
         canvas_widget = self.scatter_widget
         canvas_widget.update_idletasks()
-        w = canvas_widget.winfo_width()
-        h = canvas_widget.winfo_height()
-        if w > 0 and h > 0:
-            dpi = self.fig.get_dpi()
-            self.fig.set_size_inches(w / dpi, h / dpi, forward=True)
+        dpi = self.fig.get_dpi()
+        # Set figure to a fixed square size to keep graph height constant
+        fixed_size = 4  # inches
+        self.fig.set_size_inches(fixed_size, fixed_size, forward=True)
+        # Set canvas to fixed size matching the figure
+        pixel_size = int(fixed_size * dpi)
+        canvas_widget.config(width=pixel_size, height=pixel_size)
 
-        # Lock axes to current data range to maintain square aspect
+        # Lock axes to current data range, but do not force equal units, just make the plot square
         s_all, a_all = [], []
         if self.trajectory_s and self.trajectory_a:
             s_all.extend(self.trajectory_s); a_all.extend(self.trajectory_a)
-        if box_trajectory_s and box_trajectory_a:
-            s_all.extend(box_trajectory_s); a_all.extend(box_trajectory_a)
+        for trajectory_s, trajectory_a, _ in box_trajectories:
+            if trajectory_s and trajectory_a:
+                s_all.extend(trajectory_s); a_all.extend(trajectory_a)
 
         if s_all and a_all:
             s_all = np.asarray(s_all, dtype=float)
@@ -1097,47 +1014,36 @@ class StressAttenuationExplorer(ttk.Frame):
                 s_all = s_all[mask]; a_all = a_all[mask]
                 s_min, s_max = float(np.min(s_all)), float(np.max(s_all))
                 a_min, a_max = float(np.min(a_all)), float(np.max(a_all))
-                
                 # Add padding
                 s_range = s_max - s_min if s_max > s_min else 0.1
                 a_range = a_max - a_min if a_max > a_min else 0.1
                 s_pad = s_range * 0.05
                 a_pad = a_range * 0.05
-                
-                # Make square by using the larger range for both axes
-                max_range = max(s_range + 2*s_pad, a_range + 2*a_pad)
-                s_center = (s_min + s_max) / 2
-                a_center = (a_min + a_max) / 2
-                
-                self.ax.set_xlim(s_center - max_range/2, s_center + max_range/2)
-                self.ax.set_ylim(a_center - max_range/2, a_center + max_range/2)
+                self.ax.set_xlim(s_min - s_pad, s_max + s_pad)
+                self.ax.set_ylim(a_min - a_pad, a_max + a_pad)
+                # Make the plot square in shape (not units)
+                self.ax.set_aspect('auto', adjustable='box')
+                box = self.ax.get_position()
+                size = min(box.width, box.height)
+                self.ax.set_position([box.x0, box.y0, size, size])
             else:
-                # Default square ranges when no data
                 self.ax.set_xlim(0, 2)
                 self.ax.set_ylim(0, 2)
         else:
-            # Default square ranges when no data
             self.ax.set_xlim(0, 2)
             self.ax.set_ylim(0, 2)
         
-        self.ax.set_aspect('equal', adjustable='box')
-
         self.scatter_canvas.draw()
 
-        # Hover cursor on lines - remove frame labeling
+        # Remove mplcursors hover box
         if self._cursor:
-            try: self._cursor.remove()
-            except Exception: pass
-        artists = [*self.ax.lines]
-        if artists:
-            self._cursor = mplcursors.cursor(artists, hover=True)
-            @self._cursor.connect("add")
-            def on_add(sel):
-                x, y = sel.target
-                stress_kpa = -(10**x)  # Convert back to kPa
-                sel.annotation.set_text(
-                    f"Stress: {stress_kpa:.1f} kPa\nAtten: {y:.1f} mm⁻¹"
-                )
+            try:
+                self._cursor.remove()
+            except Exception:
+                pass
+            self._cursor = None
+        # Clear the canvas before drawing to prevent old plots from showing
+        self.scatter_canvas.draw()
 
     # ------------------------------ canvas & events -----------------------------
     def _draw_on_canvas(self, canvas, img, flow, forward=True, show_headtail=False, valid_mask=None):
@@ -1152,15 +1058,71 @@ class StressAttenuationExplorer(ttk.Frame):
         pil = Image.fromarray(disp)
         c_w = canvas.winfo_width() or pil.width
         c_h = canvas.winfo_height() or pil.height
-        scale = min(c_w / pil.width, c_h / pil.height)
+        
+        # Calculate trajectory extents if trajectories are enabled
+        img_min_x, img_max_x = 0, pil.width
+        img_min_y, img_max_y = 0, pil.height
+        
+        if (show_headtail or self.show_net_var.get()) and flow is not None:
+            H, W = flow.shape[:2]
+            step = self.quiver_step
+            
+            # Calculate all trajectory endpoints to find full extent
+            all_points = []
+            for y in range(0, H, step):
+                for x in range(0, W, step):
+                    point = np.array([x, y], dtype=np.float32)
+                    all_points.append(point.copy())
+                    
+                    for idx in range(1, self.current_idx + 1):
+                        flow_inc = self.incremental_flows.get(idx)
+                        if flow_inc is None: break
+                        xi = int(np.clip(point[0], 0, W - 1))
+                        yi = int(np.clip(point[1], 0, H - 1))
+                        delta = flow_inc[yi, xi]
+                        point = point + delta
+                        all_points.append(point.copy())
+            
+            if all_points:
+                all_points = np.array(all_points)
+                traj_min_x, traj_max_x = np.min(all_points[:, 0]), np.max(all_points[:, 0])
+                traj_min_y, traj_max_y = np.min(all_points[:, 1]), np.max(all_points[:, 1])
+                
+                # Expand image bounds to include trajectory extents with padding
+                padding = 20
+                img_min_x = min(0, traj_min_x - padding)
+                img_max_x = max(pil.width, traj_max_x + padding)
+                img_min_y = min(0, traj_min_y - padding)
+                img_max_y = max(pil.height, traj_max_y + padding)
+        
+        # Calculate effective image dimensions including trajectory extents
+        effective_width = img_max_x - img_min_x
+        effective_height = img_max_y - img_min_y
+        
+        # Scale to fit canvas while maintaining aspect ratio
+        scale = min(c_w / effective_width, c_h / effective_height)
+        
+        # Scale and position the actual image
         nw, nh = int(pil.width * scale), int(pil.height * scale)
         resized = pil.resize((nw, nh), Image.BILINEAR)
         photo = ImageTk.PhotoImage(resized)
         canvas.delete("all")
-        canvas.create_image((c_w - nw)//2, (c_h - nh)//2, anchor="nw", image=photo)
+        
+        # Position image accounting for trajectory extents
+        img_offset_x = -img_min_x * scale
+        img_offset_y = -img_min_y * scale
+        canvas_center_x = (c_w - effective_width * scale) / 2
+        canvas_center_y = (c_h - effective_height * scale) / 2
+        
+        final_x = canvas_center_x + img_offset_x
+        final_y = canvas_center_y + img_offset_y
+        
+        canvas.create_image(int(final_x), int(final_y), anchor="nw", image=photo)
         canvas.image = photo
-
-        offset_x = (c_w - nw) / 2; offset_y = (c_h - nh) / 2
+        
+        # Update offsets for trajectory drawing
+        offset_x = canvas_center_x - img_min_x * scale
+        offset_y = canvas_center_y - img_min_y * scale
         step = self.quiver_step
         base_color = np.array([30, 120, 200])
 
@@ -1190,19 +1152,20 @@ class StressAttenuationExplorer(ttk.Frame):
                         alpha = max(0.1, 1.0 - age * 0.1)
                         fade = (base_color * alpha + 255 * (1 - alpha)).astype(int)
                         col = f"#{fade[0]:02x}{fade[1]:02x}{fade[2]:02x}"
-                        canvas.create_line(x1, y1, x2, y2, arrow=tk.LAST, fill=col, width=0.25)
+                        canvas.create_line(x1, y1, x2, y2, arrow=tk.LAST, fill=col, width=0.15, arrowshape=(4, 5, 2))
 
                 if self.show_net_var.get():
                     p_start = traj_points[0]; p_end = traj_points[-1]
                     x1_net = p_start[0] * scale + offset_x; y1_net = p_start[1] * scale + offset_y
                     x2_net = p_end[0] * scale + offset_x; y2_net = p_end[1] * scale + offset_y
-                    canvas.create_line(x1_net, y1_net, x2_net, y2_net, arrow=tk.LAST, fill='lime', width=0.25)
+                    canvas.create_line(x1_net, y1_net, x2_net, y2_net, arrow=tk.LAST, fill='lime', width=0.15, arrowshape=(4, 5, 2))
 
-        if self.box_start and self.box_end:
-            x0, y0 = self.box_start; x1, y1 = self.box_end
-            x0c = x0 * scale + offset_x; y0c = y0 * scale + offset_y
-            x1c = x1 * scale + offset_x; y1c = y1 * scale + offset_y
-            canvas.create_rectangle(x0c, y0c, x1c, y1c, outline='yellow', width=2)
+        for i, (start, end, color) in enumerate(self.boxes):
+            if start and end:
+                x0, y0 = start; x1, y1 = end
+                x0c = x0 * scale + offset_x; y0c = y0 * scale + offset_y
+                x1c = x1 * scale + offset_x; y1c = y1 * scale + offset_y
+                canvas.create_rectangle(x0c, y0c, x1c, y1c, outline=color, width=4)
         
         # Add scale bar and color bar if applicable
         self._draw_scale_bar(canvas, scale, offset_x, offset_y, c_w, c_h)
@@ -1219,19 +1182,28 @@ class StressAttenuationExplorer(ttk.Frame):
                               fill='white', font=('Arial', 10, 'bold'), anchor='nw')
 
     def _on_box_start(self, event):
+        if self.current_box_idx >= len(self.colors):
+            return  # All boxes selected
         self._active_canvas = event.widget
-        self.box_start = self._canvas_to_image(event.widget, event.x, event.y)
-        self.box_end = self.box_start
+        start = self._canvas_to_image(event.widget, event.x, event.y)
+        self.boxes.append((start, start, self.colors[self.current_box_idx]))
         self._refresh_display()
 
     def _on_box_drag(self, event):
+        if not self.boxes or self.current_box_idx >= len(self.colors):
+            return
         self._active_canvas = event.widget
-        self.box_end = self._canvas_to_image(event.widget, event.x, event.y)
+        end = self._canvas_to_image(event.widget, event.x, event.y)
+        self.boxes[-1] = (self.boxes[-1][0], end, self.boxes[-1][2])
         self._refresh_display()
 
     def _on_box_end(self, event):
+        if not self.boxes or self.current_box_idx >= len(self.colors):
+            return
         self._active_canvas = event.widget
-        self.box_end = self._canvas_to_image(event.widget, event.x, event.y)
+        end = self._canvas_to_image(event.widget, event.x, event.y)
+        self.boxes[-1] = (self.boxes[-1][0], end, self.boxes[-1][2])
+        self.current_box_idx += 1
         self._refresh_display()
 
     def _canvas_to_image(self, canvas, cx, cy):
@@ -1255,9 +1227,67 @@ class StressAttenuationExplorer(ttk.Frame):
         self._refresh_display()
 
     def _clear_box(self):
-        self.box_start = None
-        self.box_end   = None
+        self.boxes = []
+        self.current_box_idx = 0
         self._refresh_display()
+    
+    def _show_histogram(self):
+        """Generate and save histogram for current response values with 2nd-98th percentile range"""
+        if not hasattr(self, '_response_data') or self._response_data is None:
+            messagebox.showwarning("No Data", "Please enable the Attenuation/Stress overlay and advance to frame 1 or later.")
+            return
+            
+        valid_response = self._response_data[np.isfinite(self._response_data)]
+        if len(valid_response) == 0:
+            messagebox.showwarning("No Data", "No finite response values found in current frame.")
+            return
+            
+        try:
+            # Create histogram figure
+            fig, ax = plt.subplots(figsize=(12, 8))
+            
+            # Calculate statistics
+            mean_val = np.mean(valid_response)
+            std_val = np.std(valid_response)
+            median_val = np.median(valid_response)
+            p2 = np.percentile(valid_response, 2)
+            p98 = np.percentile(valid_response, 98)
+            p5 = np.percentile(valid_response, 5)
+            p95 = np.percentile(valid_response, 95)
+            
+            # Create histogram with 40 bins, constrained to 2nd-98th percentile range
+            n, bins, patches = ax.hist(valid_response, bins=40, alpha=0.7, color='skyblue', 
+                                     edgecolor='black', range=(p2, p98))
+            
+            # Add vertical lines for statistics
+            ax.axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.3f}')
+            ax.axvline(median_val, color='green', linestyle='--', linewidth=2, label=f'Median: {median_val:.3f}')
+            ax.axvline(p2, color='purple', linestyle=':', linewidth=2, label=f'2nd %: {p2:.3f}')
+            ax.axvline(p98, color='purple', linestyle=':', linewidth=2, label=f'98th %: {p98:.3f}')
+            ax.axvline(p5, color='orange', linestyle=':', linewidth=1, alpha=0.7, label=f'5th %: {p5:.3f}')
+            ax.axvline(p95, color='orange', linestyle=':', linewidth=1, alpha=0.7, label=f'95th %: {p95:.3f}')
+            
+            # Set x-axis limits to 2nd-98th percentile range
+            ax.set_xlim(p2, p98)
+            
+            # Labels and title
+            ax.set_xlabel('Attenuation Response (mm⁻¹/kPa)', fontsize=12)
+            ax.set_ylabel('Pixel Count', fontsize=12)
+            ax.set_title(f'Attenuation Response Histogram - Frame {self.current_idx}\n'
+                        f'Total Pixels: {len(valid_response)}, Display Range: [{p2:.3f}, {p98:.3f}] (2nd-98th %)',
+                        fontsize=14)
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+            
+            # Save figure
+            filename = f'response_histogram_frame_{self.current_idx:03d}.png'
+            fig.savefig(filename, dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            
+            messagebox.showinfo("Histogram Saved", f"Histogram saved as: {filename}\nRange: 2nd-98th percentile [{p2:.3f}, {p98:.3f}]")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to create histogram: {str(e)}")
 
     def _show_export_dialog(self):
         if not self.sequence_root or not self.images["oct"]:
@@ -1289,11 +1319,11 @@ class StressAttenuationExplorer(ttk.Frame):
         self.export_overlay = tk.BooleanVar(value=True)
         self.export_all = tk.BooleanVar(value=False)
         
-        ttk.Checkbutton(main_frame, text="Warped OCT Arrays (.mat)", 
+        ttk.Checkbutton(main_frame, text="Co-registered OCT Images (.png)", 
                        variable=self.export_warped_oct).pack(anchor='w', pady=2)
-        ttk.Checkbutton(main_frame, text="Deformation Fields (.mat)", 
+        ttk.Checkbutton(main_frame, text="Co-registered Attenuation Maps (.png)", 
                        variable=self.export_deformation).pack(anchor='w', pady=2)
-        ttk.Checkbutton(main_frame, text="Attenuation/Stress Overlay Images (.png)", 
+        ttk.Checkbutton(main_frame, text="Co-registered Stress Maps (.png)", 
                        variable=self.export_overlay).pack(anchor='w', pady=2)
         
         ttk.Separator(main_frame, orient='horizontal').pack(fill='x', pady=10)
@@ -1361,216 +1391,131 @@ class StressAttenuationExplorer(ttk.Frame):
             current_step = 0
             
             # Count total steps
+            num_frames = len(self.images["oct"])
             if self.export_warped_oct.get():
-                total_steps += len(self.images["oct"])
+                total_steps += num_frames
             if self.export_deformation.get():
-                total_steps += len(self.images["oct"]) - 1  # No flow for first frame
+                total_steps += num_frames
             if self.export_overlay.get():
-                total_steps += len(self.images["oct"]) - 1  # No overlay for first frame
+                total_steps += num_frames
                 
             progress_bar['maximum'] = total_steps
             
-            # Export warped OCT arrays
+            # Export co-registered OCT images
             if self.export_warped_oct.get():
-                status_label.config(text="Exporting warped OCT arrays...")
+                status_label.config(text="Exporting co-registered OCT images...")
                 self.update_idletasks()
                 
-                warped_arrays = []
+                oct_folder = os.path.join(export_folder, 'coregistered_oct')
+                os.makedirs(oct_folder, exist_ok=True)
+                
                 for idx in range(len(self.images["oct"])):
                     if idx == 0:
-                        warped_arrays.append(self.images["oct"][0])
+                        # Reference frame - no warping needed
+                        oct_img = self.images["oct"][0]
                     else:
-                        warped_oct, _ = self._warp_with_shared_flow(self.images["oct"][idx], idx)
-                        warped_arrays.append(warped_oct if warped_oct is not None else self.images["oct"][idx])
+                        # Warp to reference frame
+                        oct_img, _ = self._warp_with_shared_flow(self.images["oct"][idx], idx)
+                        if oct_img is None:
+                            oct_img = self.images["oct"][idx]  # Fallback to original
+                    
+                    # Convert to PIL Image and save
+                    if oct_img.ndim == 2:
+                        pil_img = Image.fromarray(oct_img.astype(np.uint8), mode='L')
+                    else:
+                        pil_img = Image.fromarray(oct_img.astype(np.uint8))
+                    
+                    filename = f'oct_frame_{idx:03d}.png'
+                    pil_img.save(os.path.join(oct_folder, filename))
                     
                     current_step += 1
                     progress_bar['value'] = current_step
                     self.update_idletasks()
-                
-                # Save as .mat file
-                warped_stack = np.stack(warped_arrays, axis=2)
-                sio.savemat(os.path.join(export_folder, 'warped_oct_arrays.mat'), 
-                           {'warped_oct': warped_stack})
             
-            # Export deformation fields
+            # Export co-registered attenuation maps
             if self.export_deformation.get():
-                status_label.config(text="Exporting deformation fields...")
+                status_label.config(text="Exporting co-registered attenuation maps...")
                 self.update_idletasks()
                 
-                flow_arrays = []
-                for idx in range(1, len(self.images["oct"])):
-                    flow = self._get_cumulative_flow(idx)
-                    if flow is not None:
-                        flow_arrays.append(flow)
+                att_folder = os.path.join(export_folder, 'coregistered_attenuation')
+                os.makedirs(att_folder, exist_ok=True)
+                
+                for idx in range(len(self.scalar_images["att"])):
+                    if idx == 0:
+                        # Reference frame - no warping needed
+                        att_data = self.scalar_images["att"][0]
+                    else:
+                        # Warp to reference frame
+                        att_data, _ = self._warp_with_shared_flow(self.scalar_images["att"][idx], idx)
+                        if att_data is None:
+                            att_data = self.scalar_images["att"][idx]  # Fallback to original
+                    
+                    # Apply block averaging for consistency
+                    att_data = block_average(att_data)
+                    
+                    # Convert to RGB using viridis colormap (0-10 mm⁻¹)
+                    att_clipped = np.clip(att_data, 0, 10)
+                    rgb_img = self._apply_colormap(att_clipped, 'viridis', 0, 10)
+                    pil_img = Image.fromarray(rgb_img)
+                    
+                    filename = f'attenuation_frame_{idx:03d}.png'
+                    pil_img.save(os.path.join(att_folder, filename))
                     
                     current_step += 1
                     progress_bar['value'] = current_step
                     self.update_idletasks()
-                
-                if flow_arrays:
-                    flow_stack = np.stack(flow_arrays, axis=2)
-                    sio.savemat(os.path.join(export_folder, 'deformation_fields.mat'), 
-                               {'flows': flow_stack})
             
-            # Export overlay images
+            # Export co-registered stress maps
             if self.export_overlay.get():
-                status_label.config(text="Exporting overlay images...")
+                status_label.config(text="Exporting co-registered stress maps...")
                 self.update_idletasks()
                 
-                overlay_folder = os.path.join(export_folder, 'overlay_images')
-                os.makedirs(overlay_folder, exist_ok=True)
+                stress_folder = os.path.join(export_folder, 'coregistered_stress')
+                os.makedirs(stress_folder, exist_ok=True)
                 
-                for idx in range(1, len(self.images["oct"])):
-                    overlay_img = self._generate_overlay_image(idx)
-                    if overlay_img is not None:
-                        filename = f'overlay_frame_{idx:03d}.png'
-                        Image.fromarray(overlay_img).save(os.path.join(overlay_folder, filename))
+                for idx in range(len(self.scalar_images["stress"])):
+                    if idx == 0:
+                        # Reference frame - no warping needed
+                        stress_data = self.scalar_images["stress"][0]
+                    else:
+                        # Warp to reference frame
+                        stress_data, _ = self._warp_with_shared_flow(self.scalar_images["stress"][idx], idx)
+                        if stress_data is None:
+                            stress_data = self.scalar_images["stress"][idx]  # Fallback to original
+                    
+                    # Use log scaling for display (same as in overlay)
+                    stress_abs = np.abs(stress_data)
+                    stress_log = np.log10(stress_abs + 1e-6)
+                    stress_log_clipped = np.clip(stress_log, 0, 2)  # log10(1) to log10(100)
+                    
+                    # Convert to RGB using jet colormap with log scaling
+                    rgb_img = self._apply_colormap(stress_log_clipped, 'jet', 0, 2)
+                    pil_img = Image.fromarray(rgb_img)
+                    
+                    filename = f'stress_frame_{idx:03d}.png'
+                    pil_img.save(os.path.join(stress_folder, filename))
                     
                     current_step += 1
                     progress_bar['value'] = current_step
                     self.update_idletasks()
             
             progress_dialog.destroy()
-            messagebox.showinfo("Export Complete", f"Data exported successfully to:\n{export_folder}")
+            exported_items = []
+            if self.export_warped_oct.get():
+                exported_items.append('Co-registered OCT images')
+            if self.export_deformation.get():
+                exported_items.append('Co-registered attenuation maps')
+            if self.export_overlay.get():
+                exported_items.append('Co-registered stress maps')
+            
+            items_text = '\n• '.join([''] + exported_items)
+            messagebox.showinfo("Export Complete", f"Successfully exported:{items_text}\n\nTo folder: {export_folder}")
             
         except Exception as e:
             progress_dialog.destroy()
             messagebox.showerror("Export Error", f"An error occurred during export:\n{str(e)}")
     
-    def _generate_overlay_image(self, frame_idx):
-        """Generate the overlay image for a specific frame"""
-        try:
-            # Get warped OCT as base
-            warped_oct, mask_oct = self._warp_with_shared_flow(self.images["oct"][frame_idx], frame_idx)
-            if warped_oct is None:
-                return None
-                
-            base_gray = warped_oct if warped_oct.ndim == 2 else cv2.cvtColor(warped_oct, cv2.COLOR_RGB2GRAY)
-            display_rgb = self._to_rgb(base_gray)
-            
-            # Create adipose mask
-            adipose_mask = self._create_adipose_mask(
-                base_gray,
-                threshold_high=self.mask_threshold_high.get(),
-                min_area=self.mask_min_area.get()
-            )
-            
-            # Combine masks
-            geom_mask = mask_oct
-            if geom_mask is not None and adipose_mask is not None:
-                final_mask = geom_mask & ~adipose_mask
-            elif adipose_mask is not None:
-                final_mask = ~adipose_mask
-            else:
-                final_mask = geom_mask
-                
-            # Generate overlay if we have the required data
-            a_ref = self._safe_get(self.scalar_images["att"], 0)
-            s_ref = self._safe_get(self.scalar_images["stress"], 0)
-            a_cur = self._safe_get(self.scalar_images["att"], frame_idx)
-            s_cur = self._safe_get(self.scalar_images["stress"], frame_idx)
-            
-            if all(v is not None for v in (a_ref, s_ref, a_cur, s_cur)):
-                a_ref_w, mask_a_ref = self._warp_with_shared_flow(a_ref, 0)
-                s_ref_w, mask_s_ref = self._warp_with_shared_flow(s_ref, 0)
-                a_cur_w, mask_a_cur = self._warp_with_shared_flow(a_cur, frame_idx)
-                s_cur_w, mask_s_cur = self._warp_with_shared_flow(s_cur, frame_idx)
-                
-                if all(v is not None for v in (a_ref_w, s_ref_w, a_cur_w, s_cur_w)):
-                    # Apply NaN-aware smoothing to attenuation data to reduce speckle noise
-                    def smooth_with_nan_handling(data, sigma):
-                        """Apply Gaussian smoothing while handling NaN values properly"""
-                        if sigma <= 0:
-                            return data
-                        
-                        # Create mask for valid (finite) values
-                        valid_mask = np.isfinite(data)
-                        
-                        if not np.any(valid_mask):
-                            return data  # Return original if all NaN
-                        
-                        # Create smoothed version with NaN handling
-                        smoothed_data = data.copy()
-                        
-                        # Fill NaN values with local average of valid neighbors for smoothing
-                        temp_data = data.copy()
-                        temp_data[~valid_mask] = 0  # Temporarily set NaN to 0
-                        
-                        # Apply Gaussian filter to both data and weights
-                        smoothed_values = ndimage.gaussian_filter(temp_data.astype(float), sigma=sigma)
-                        weight_sum = ndimage.gaussian_filter(valid_mask.astype(float), sigma=sigma)
-                        
-                        # Avoid division by zero
-                        weight_sum[weight_sum == 0] = 1
-                        
-                        # Calculate weighted average (only where we had valid data to smooth)
-                        result = smoothed_values / weight_sum
-                        
-                        # Preserve NaN where we had no valid neighbors to smooth with
-                        result[weight_sum < 0.1] = np.nan
-                        
-                        return result
-                    
-                    smoothing_sigma = self.att_smoothing.get()
-                    a_ref_w_smooth = smooth_with_nan_handling(a_ref_w, smoothing_sigma)
-                    a_cur_w_smooth = smooth_with_nan_handling(a_cur_w, smoothing_sigma)
-                    
-                    # Calculate changes using smoothed attenuation data
-                    d_att = np.abs(a_cur_w_smooth - a_ref_w_smooth).astype(np.float32)
-                    d_str = np.abs(s_cur_w - s_ref_w).astype(np.float32)
-                    
-                    # Create overlay
-                    eps = 1e-6
-                    valid = np.isfinite(d_att) & np.isfinite(d_str) & (d_str > eps)
-                    if final_mask is not None: 
-                        valid &= final_mask
-                    for m in (mask_a_ref, mask_s_ref, mask_a_cur, mask_s_cur):
-                        if m is not None: valid &= m
-                        
-                    if np.any(valid):
-                        rgba = np.zeros((*d_att.shape, 4), dtype=np.float32)
-                        
-                        att_norm = d_att / (np.percentile(d_att[valid], 98) + eps)
-                        str_norm = d_str / (np.percentile(d_str[valid], 98) + eps)
-                        
-                        sensitivity = self.sensitivity.get()
-                        stability = np.exp(-sensitivity * att_norm / (str_norm + eps))
-                        
-                        # Use warm-cold colormap for better visualization
-                        # Create RdBu_r colormap (red-white-blue reversed)
-                        # Blue = cold = unstable/changing (healthy tissue response)
-                        # Red = warm = stable (potential cancer)
-                        cmap = plt.cm.RdBu_r
-                        
-                        # Map stability values to warm-cold colors
-                        # stability = 0 (unstable/changing) -> blue (cold)
-                        # stability = 1 (stable/cancer) -> red (warm)
-                        warm_cold_colors = cmap(stability)
-                        
-                        # Extract RGB channels from warm-cold colormap
-                        rgba[..., 0] = warm_cold_colors[..., 0]  # Red
-                        rgba[..., 1] = warm_cold_colors[..., 1]  # Green  
-                        rgba[..., 2] = warm_cold_colors[..., 2]  # Blue
-                        rgba[..., 3] = 1            # Full opacity
-                        
-                        rgba[~valid] = 0
-                        
-                        # Apply blur
-                        for channel in range(4):
-                            rgba[..., channel] = ndimage.gaussian_filter(rgba[..., channel], sigma=1.5)
-                        
-                        # Composite with base image
-                        rgba_uint8 = (rgba * 255.0 + 0.5).astype(np.uint8)
-                        ratio_img = Image.fromarray(rgba_uint8).convert('RGBA')
-                        base_rgba = Image.fromarray(display_rgb).convert('RGBA')
-                        display_rgb = Image.alpha_composite(base_rgba, ratio_img)
-                        display_rgb = np.array(display_rgb.convert('RGB'))
-            
-            return display_rgb
-            
-        except Exception as e:
-            print(f"Error generating overlay for frame {frame_idx}: {e}")
-            return None
+    # _generate_overlay_image method removed - replaced with direct export functionality
 
     # ------------------------------ sizing logic --------------------------------
     def _on_tools_resize(self, event):
